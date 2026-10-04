@@ -1,0 +1,19 @@
+# 开发产物
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# 构建
+build/
+dist/
+*.spec
+
+# 本工具运行时导出的备份
+*.journal.json
+journal_backup_*.json
+
+# 编辑器
+.vscode/
+.idea/
