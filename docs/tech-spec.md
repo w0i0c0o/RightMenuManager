@@ -15,6 +15,8 @@ invariant:    不修改菜单项自身（verb/handler 键）的其它值：默�
 invariant:    enable/恢复只删除本工具记录过或明确指向该项的屏蔽值，不误删他人数据
 invariant:    未提权时对 HKLM 的写入必须先失败、后提示，不得半途留下部分改动
 constraint:   内置 Python 3.10 无 tkinter；run.cmd/run.ps1 自动定位带 tkinter 的解释器，找不到则明确提示退出
+constraint:   run.ps1 必须以 UTF-8 (BOM) 保存：Windows PowerShell 5.1 对无 BOM 的 .ps1 按 ANSI 解析，
+              含中文会乱码并破坏脚本解析（曾导致双击 run.cmd 无窗口）；run.cmd 保持纯 ASCII
 constraint:   不引入任何 pip 依赖，保证离线可跑、可复现
 convention:   TDD（先写失败测试再实现）；测试用 FakeRegistry 内存实现，不碰真实注册表
 convention:   文件名 snake_case；界面文案中文；注释仅解释「为什么」

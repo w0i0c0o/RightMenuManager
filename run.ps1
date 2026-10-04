@@ -1,14 +1,16 @@
-# 启动 Windows 右键菜单管理器。
+﻿# 启动 Windows 右键菜单管理器。
 # 自动挑选一个带 tkinter 的 Python 解释器。
+# 注意：本文件必须以 UTF-8 (带 BOM) 保存 —— Windows PowerShell 5.1 读取无 BOM 的
+# .ps1 时按系统 ANSI 代码页解析，中文会变乱码并破坏脚本解析。
 
 $ErrorActionPreference = 'Continue'
 
 $candidates = @(
-    @{ Exe = 'py';                         Args = @('-3.14') },
-    @{ Exe = 'py';                         Args = @('-3.13') },
-    @{ Exe = 'py';                         Args = @('-3')    },
-    @{ Exe = 'C:\Python314\python.exe';    Args = @()        },
-    @{ Exe = 'python';                     Args = @()        }
+    @{ Exe = 'py';                      Args = @('-3.14') },
+    @{ Exe = 'py';                      Args = @('-3.13') },
+    @{ Exe = 'py';                      Args = @('-3')    },
+    @{ Exe = 'C:\Python314\python.exe'; Args = @()        },
+    @{ Exe = 'python';                  Args = @()        }
 )
 
 function Test-HasTkinter($exe, $pre) {
