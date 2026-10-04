@@ -31,6 +31,7 @@
   `DriverStore`、`Program Files` 普通目录、`AppData` 算第三方；无线索时不隐藏）。
   过滤在归并前对条目生效，状态栏显示本次隐藏数量。实测 machine 范围 411 项中 191 项判为自带
 - 测试：新增 `test_system_items.py`，并扩充 controller / UI 冒烟用例（170 → 198 项）
+- 许可证：采用 **GPL-3.0**，加入官方全文 `LICENSE`，README 补充中文许可说明与版权声明
 - 可移植打包：新增 `package_portable.ps1`，一键挑出运行必需文件（`run.cmd` / `run.ps1` /
   `rightmenu\` 下 `.py` / `README.md`）到发行目录 `release\`，自动生成 `VERSION.txt`
   （版本号、打包时间、运行要求），可选 `-Zip`；README 新增「移植到其他机器」章节，

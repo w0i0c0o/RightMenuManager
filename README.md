@@ -135,6 +135,29 @@ powershell -ExecutionPolicy Bypass -File package_portable.ps1 -Destination D:\Ri
 
 目标机器要求：Windows 10/11 + 带 tkinter 的 Python 3.13+，双击 `run.cmd` 即可。
 
+## 许可证
+
+本项目以 **GNU General Public License v3.0（GPL-3.0）** 发布，全文见 [LICENSE](LICENSE)。
+
+你可以自由使用、修改、分发本软件（包括商业用途）；但若你分发修改后的版本，
+必须同样以 GPL-3.0 授权并公开完整源码（copyleft）。换言之：欢迎使用与二次开发，
+但**不能把本项目的代码闭源转卖** —— 任何收到你分发版本的人，都有权免费取得其源码。
+
+```
+Copyright (C) 2026 w0i0c0o
+
+This program is free software: you can redistribute it and/or modify it under the
+terms of the GNU General Public License as published by the Free Software Foundation,
+either version 3 of the License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE.  See the GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License along with this
+program.  If not, see <https://www.gnu.org/licenses/>.
+```
+
 ## 文档
 
 - 技术规格：`docs/tech-spec.md`
