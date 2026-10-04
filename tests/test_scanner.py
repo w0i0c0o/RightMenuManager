@@ -1,9 +1,11 @@
 import os
 import unittest
+from unittest import mock
 
 from rightmenu.fake_registry import FakeRegistry
 from rightmenu.model import DisableMethod, Kind, Scope
 from rightmenu.registry import REG_SZ
+from rightmenu.resources import resolve_text
 from rightmenu.scanner import blocked_key_path, scan
 
 CLASSES = r"HKCU\Software\Classes"
@@ -13,6 +15,10 @@ BLOCKED_USER = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Shell Extensions
 
 GUID = "{11111111-1111-1111-1111-111111111111}"
 GUID2 = "{22222222-2222-2222-2222-222222222222}"
+GUID3 = "{33333333-3333-3333-3333-333333333333}"
+GUID4 = "{44444444-4444-4444-4444-444444444444}"
+
+INDIRECT = r"@rightmenutest.dll,-1"
 
 
 def build_registry() -> FakeRegistry:
@@ -26,6 +32,10 @@ def build_registry() -> FakeRegistry:
             CLASSES + r"\*\shell\Hidden": {"": ("已禁用项", REG_SZ), "LegacyDisable": ("", REG_SZ)},
             CLASSES + r"\*\shell\Hidden\command": {"": ("hidden.exe", REG_SZ)},
             CLASSES + r"\*\shell\Junk": {},
+            CLASSES + r"\*\shell\MuivarbVerb": {"": ("默认文本", REG_SZ), "MUIVerb": ("MUIVerb 文本", REG_SZ)},
+            CLASSES + r"\*\shell\MuivarbVerb\command": {"": ("muivarb.exe", REG_SZ)},
+            CLASSES + r"\*\shell\IndirectVerb": {"": (INDIRECT, REG_SZ)},
+            CLASSES + r"\*\shell\IndirectVerb\command": {"": ("cmd.exe", REG_SZ)},
             CLASSES + r"\Directory\Background\shell\Bg": {"": ("背景项", REG_SZ)},
             CLASSES + r"\Directory\Background\shell\Bg\command": {"": ("bg.exe", REG_SZ)},
             CLASSES + r"\SystemFileAssociations\.txt\shell\TxtVerb": {"": ("文本项", REG_SZ)},
@@ -36,6 +46,13 @@ def build_registry() -> FakeRegistry:
             CLASSES + "\\CLSID\\" + GUID + r"\InprocServer32": {"": (r"%SystemRoot%\demo.dll", REG_SZ)},
             CLASSES + r"\*\shellex\ContextMenuHandlers\BlockedShell": {"": (GUID2, REG_SZ)},
             CLASSES + "\\CLSID\\" + GUID2 + r"\InprocServer32": {"": (r"%SystemRoot%\blocked.dll", REG_SZ)},
+            CLASSES + r"\*\shellex\ContextMenuHandlers\IndirectShell": {"": (GUID4, REG_SZ)},
+            CLASSES + "\\CLSID\\" + GUID4: {"": (INDIRECT, REG_SZ)},
+            # GUID 命名、默认值为空的处理器：CLSID 只能从键名推断（系统组件常见形态）
+            CLASSES + r"\*\shellex\ContextMenuHandlers" + "\\" + GUID3: {"": ("", REG_SZ)},
+            CLASSES + "\\CLSID\\" + GUID3: {"": ("压缩包菜单", REG_SZ)},
+            # 少数处理器把可读名称直接写在默认值里
+            CLASSES + r"\*\shellex\ContextMenuHandlers\PlainShell": {"": ("直接写入的名称", REG_SZ)},
             BLOCKED_USER: {GUID2: ("", REG_SZ)},
             # --- 机器范围 ---
             HKLM_CLASSES + r"\*\shell\MachineApp": {"": ("机器项", REG_SZ)},
@@ -135,6 +152,70 @@ class TestScopeHandling(unittest.TestCase):
     def test_machine_scope_still_includes_user_items(self):
         names = [i.key_name for i in scan(self.reg, Scope.MACHINE)]
         self.assertIn("DemoApp", names)
+
+
+class TestDisplayNameResolution(unittest.TestCase):
+    def setUp(self):
+        self.reg = build_registry()
+
+    def test_static_verb_muivarb_takes_priority_over_default(self):
+        items = scan(self.reg, Scope.USER)
+        self.assertEqual(find(items, "MuivarbVerb").display_name, "MUIVerb 文本")
+
+    def test_static_verb_indirect_string_is_resolved(self):
+        loader = lambda source: {INDIRECT: "在此处打开命令窗口(&W)"}.get(source)
+        items = scan(self.reg, Scope.USER, loader=loader)
+        self.assertEqual(find(items, "IndirectVerb").display_name, "在此处打开命令窗口(W)")
+
+    def test_static_verb_unresolved_indirect_falls_back_to_key_name(self):
+        items = scan(self.reg, Scope.USER, loader=lambda source: None)
+        self.assertEqual(find(items, "IndirectVerb").display_name, "IndirectVerb")
+
+    def test_shellex_guid_named_handler_derives_clsid_from_key_name(self):
+        items = scan(self.reg, Scope.USER)
+        item = find(items, GUID3)
+        self.assertEqual(item.clsid, GUID3)
+        self.assertEqual(item.display_name, "压缩包菜单")
+
+    def test_shellex_handler_with_readable_default_value(self):
+        items = scan(self.reg, Scope.USER)
+        self.assertEqual(find(items, "PlainShell").display_name, "直接写入的名称")
+
+    def test_shellex_clsid_indirect_string_is_resolved(self):
+        loader = lambda source: {INDIRECT: "压缩包菜单"}.get(source)
+        items = scan(self.reg, Scope.USER, loader=loader)
+        self.assertEqual(find(items, "IndirectShell").display_name, "压缩包菜单")
+
+    def test_shellex_clsid_indirect_string_unresolved_falls_back_to_key_name(self):
+        items = scan(self.reg, Scope.USER, loader=lambda source: None)
+        self.assertEqual(find(items, "IndirectShell").display_name, "IndirectShell")
+
+
+class TestNameFallbackFlag(unittest.TestCase):
+    """标记「名称只是回退到键名」的项，供界面提示用户设置别名。"""
+
+    def setUp(self):
+        self.reg = build_registry()
+
+    def test_static_resolved_name_is_not_fallback(self):
+        items = scan(self.reg, Scope.USER)
+        self.assertFalse(find(items, "DemoApp").name_is_fallback)
+
+    def test_static_unresolved_indirect_is_fallback(self):
+        items = scan(self.reg, Scope.USER, loader=lambda source: None)
+        self.assertTrue(find(items, "IndirectVerb").name_is_fallback)
+
+    def test_shellex_with_friendly_name_is_not_fallback(self):
+        items = scan(self.reg, Scope.USER)
+        self.assertFalse(find(items, "DemoShell").name_is_fallback)
+
+    def test_shellex_readable_default_is_not_fallback(self):
+        items = scan(self.reg, Scope.USER)
+        self.assertFalse(find(items, "PlainShell").name_is_fallback)
+
+    def test_shellex_without_readable_name_is_fallback(self):
+        items = scan(self.reg, Scope.USER)
+        self.assertTrue(find(items, "BlockedShell").name_is_fallback)
 
 
 class TestScanIsReadOnly(unittest.TestCase):

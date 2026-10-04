@@ -8,7 +8,9 @@ venv/
 # 构建
 build/
 dist/
+release/
 *.spec
+*.zip
 
 # 本工具运行时导出的备份
 *.journal.json

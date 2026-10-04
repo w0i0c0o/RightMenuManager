@@ -5,6 +5,10 @@
 
 $ErrorActionPreference = 'Continue'
 
+# 切到脚本所在目录：`python -m rightmenu` 依赖当前目录在 sys.path 里，
+# 若从桌面快捷方式或其他目录启动，不切换就会「No module named rightmenu」。
+Set-Location -LiteralPath $PSScriptRoot
+
 $candidates = @(
     @{ Exe = 'py';                      Args = @('-3.14') },
     @{ Exe = 'py';                      Args = @('-3.13') },

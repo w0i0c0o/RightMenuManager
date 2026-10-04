@@ -196,5 +196,105 @@ class TestPreviewText(ControllerTestCase):
         self.assertIn("已跳过", text)
 
 
+def build_duplicate_registry() -> FakeRegistry:
+    """同一功能「上传到百度网盘」在两个位置各注册一份。"""
+    return FakeRegistry(
+        initial={
+            CLASSES + r"\*\shell\BaiduAll": {"": ("上传到百度网盘", REG_SZ)},
+            CLASSES + r"\*\shell\BaiduAll\command": {"": ("baidu.exe %1", REG_SZ)},
+            CLASSES + r"\.docx\shell\BaiduDocx": {"": ("上传到百度网盘", REG_SZ)},
+            CLASSES + r"\.docx\shell\BaiduDocx\command": {"": ("baidu.exe %1", REG_SZ)},
+            CLASSES + r"\*\shell\Other": {"": ("其他功能", REG_SZ)},
+            CLASSES + r"\*\shell\Other\command": {"": ("other.exe", REG_SZ)},
+        }
+    )
+
+
+class TestGrouping(ControllerTestCase):
+    def setUp(self):
+        super().setUp()
+        self.reg = build_duplicate_registry()
+        self.controller_ = Controller(self.reg, self.journal, scope=Scope.USER, admin=False)
+
+    def group(self, label):
+        for group in self.controller_.groups():
+            if group.label == label:
+                return group
+        raise AssertionError(f"未找到功能组: {label}")
+
+    def test_merges_same_function_across_locations(self):
+        baidu = self.group("上传到百度网盘")
+        self.assertEqual(baidu.total, 2)
+        self.assertEqual(len(self.controller_.groups()), 2)
+
+    def test_disable_whole_group_disables_every_instance(self):
+        baidu = self.group("上传到百度网盘")
+        result = self.controller_.disable(list(baidu.items))
+        self.assertTrue(result.ok)
+        self.assertEqual(len(result.applied), 2)
+        self.assertEqual(self.group("上传到百度网盘").state, "disabled")
+
+    def test_filter_groups_matches_member_only_keeps_matching_instances(self):
+        groups = self.controller_.filter_groups(".docx")
+        self.assertEqual(len(groups), 1)
+        self.assertEqual(groups[0].label, "上传到百度网盘")
+        self.assertEqual(groups[0].total, 1)
+        self.assertIn(".docx", groups[0].items[0].location)
+
+    def test_filter_groups_matches_command_across_instances(self):
+        groups = self.controller_.filter_groups("baidu.exe")
+        self.assertEqual(groups[0].total, 2)
+
+    def test_alias_changes_label_and_is_searchable(self):
+        key = self.group("上传到百度网盘").key
+        self.controller_.set_alias(key, "百度网盘上传")
+        self.assertEqual(self.group("百度网盘上传").raw_name, "上传到百度网盘")
+        self.assertEqual([g.label for g in self.controller_.filter_groups("百度网盘上传")], ["百度网盘上传"])
+
+    def test_clear_alias_restores_raw_name(self):
+        key = self.group("上传到百度网盘").key
+        self.controller_.set_alias(key, "临时名")
+        self.controller_.clear_alias(key)
+        self.assertEqual(self.group("上传到百度网盘").label, "上传到百度网盘")
+
+
+def build_mixed_registry() -> FakeRegistry:
+    """一个 Windows 自带项（裸 shell32.dll 引用）+ 一个第三方项（完整路径）。"""
+    return FakeRegistry(
+        initial={
+            CLASSES + r"\Folder\shell\pintohome": {"MUIVerb": ("@shell32.dll,-51601", REG_SZ)},
+            CLASSES + r"\*\shell\DemoApp": {"": ("Demo 应用", REG_SZ)},
+            CLASSES + r"\*\shell\DemoApp\command": {"": (r"C:\demo.exe %1", REG_SZ)},
+        }
+    )
+
+
+class TestHideSystemFilter(ControllerTestCase):
+    def setUp(self):
+        super().setUp()
+        self.reg = build_mixed_registry()
+        self.controller_ = Controller(self.reg, self.journal, scope=Scope.USER, admin=False)
+
+    def test_flags_only_the_windows_item(self):
+        self.assertTrue(self.item(self.controller_, "pintohome").is_system)
+        self.assertFalse(self.item(self.controller_, "DemoApp").is_system)
+
+    def test_default_shows_both(self):
+        self.assertEqual(len(self.controller_.filter_groups("")), 2)
+
+    def test_hide_system_drops_windows_item(self):
+        groups = self.controller_.filter_groups("", hide_system=True)
+        self.assertEqual([g.label for g in groups], ["Demo 应用"])
+
+    def test_hidden_system_count(self):
+        self.assertEqual(self.controller_.hidden_system_count(), 1)
+
+    def test_visible_items_respects_hide_system(self):
+        self.assertEqual(len(self.controller_.visible_items(hide_system=True)), 1)
+
+    def test_query_and_hide_system_combine(self):
+        self.assertEqual(self.controller_.filter_groups("pintohome", hide_system=True), [])
+
+
 if __name__ == "__main__":
     unittest.main()

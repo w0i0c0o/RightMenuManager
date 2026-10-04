@@ -25,9 +25,10 @@ class TestRelaunchAsAdmin(unittest.TestCase):
     def test_invokes_runas_with_current_arguments(self):
         captured = {}
 
-        def fake_spawn(executable, params):
+        def fake_spawn(executable, params, workdir=None):
             captured["exe"] = executable
             captured["params"] = params
+            captured["workdir"] = workdir
             return 33
 
         with mock.patch.object(elevation, "is_admin", return_value=False), mock.patch.object(
@@ -39,6 +40,33 @@ class TestRelaunchAsAdmin(unittest.TestCase):
         self.assertEqual(captured["exe"], sys.executable)
         self.assertIn("--scan", captured["params"])
         self.assertIn("machine", captured["params"])
+
+    def test_relaunch_restores_module_invocation(self):
+        """重启必须带 `-m rightmenu`，否则提权后只会拉起一个空解释器。"""
+        captured = {}
+
+        def fake_spawn(executable, params, workdir=None):
+            captured["params"] = params
+            captured["workdir"] = workdir
+            return 33
+
+        with mock.patch.object(elevation, "is_admin", return_value=False), mock.patch.object(
+            elevation, "_shell_execute_runas", fake_spawn
+        ):
+            elevation.relaunch_as_admin([])
+
+        self.assertIn("-m rightmenu", captured["params"])
+        self.assertEqual(captured["workdir"], elevation._PROJECT_ROOT)
+
+    def test_relaunch_uses_no_extra_args_by_default(self):
+        with mock.patch.object(elevation, "is_admin", return_value=False), mock.patch.object(
+            elevation, "sys"
+        ) as fake_sys, mock.patch.object(elevation, "_shell_execute_runas", return_value=33):
+            fake_sys.argv = ["rightmenu"]
+            elevation.relaunch_as_admin()
+            params = elevation._shell_execute_runas.call_args[0][1]
+
+        self.assertEqual(params.strip(), "-m rightmenu")
 
     def test_reports_failure_when_uac_declined(self):
         with mock.patch.object(elevation, "is_admin", return_value=False), mock.patch.object(

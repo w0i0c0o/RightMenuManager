@@ -51,6 +51,10 @@ class ContextMenuItem:
     extended: bool = False
     disabled: bool = False
     method: DisableMethod | None = None
+    #: ``display_name`` 是否只是回退到注册表键名（没解析出可读文字）。
+    name_is_fallback: bool = False
+    #: 是否由 Windows 自带（见 ``rightmenu.system_items``）；用于「只看第三方」过滤。
+    is_system: bool = False
 
     @property
     def id(self) -> str:

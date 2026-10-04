@@ -39,6 +39,29 @@ def build_registry() -> FakeRegistry:
     )
 
 
+def build_duplicate_registry() -> FakeRegistry:
+    """同一功能「上传到百度网盘」在「所有文件」和「.docx 文件」各注册一份。"""
+    return FakeRegistry(
+        initial={
+            CLASSES + r"\*\shell\BaiduAll": {"": ("上传到百度网盘", REG_SZ)},
+            CLASSES + r"\*\shell\BaiduAll\command": {"": ("baidu.exe %1", REG_SZ)},
+            CLASSES + r"\.docx\shell\BaiduDocx": {"": ("上传到百度网盘", REG_SZ)},
+            CLASSES + r"\.docx\shell\BaiduDocx\command": {"": ("baidu.exe %1", REG_SZ)},
+        }
+    )
+
+
+def build_mixed_registry() -> FakeRegistry:
+    """一个 Windows 自带项（裸 shell32.dll 引用）+ 一个第三方项（完整路径）。"""
+    return FakeRegistry(
+        initial={
+            CLASSES + r"\Folder\shell\pintohome": {"MUIVerb": ("@shell32.dll,-51601", REG_SZ)},
+            CLASSES + r"\*\shell\DemoApp": {"": ("Demo 应用", REG_SZ)},
+            CLASSES + r"\*\shell\DemoApp\command": {"": (r"C:\demo.exe %1", REG_SZ)},
+        }
+    )
+
+
 def assert_no_residue(test, reg, before):
     after = reg.snapshot()
     for path, values in before.items():
@@ -70,6 +93,17 @@ class AppSmokeCase(unittest.TestCase):
 
     def app(self, scope=Scope.USER, admin=False) -> App:
         app = App(self.reg, self.journal, scope=scope, admin=admin, root=self.root)
+        self.root.update()
+        return app
+
+    def app_with(self, reg, scope=Scope.USER, admin=False) -> App:
+        app = App(
+            reg,
+            Journal(Path(self._tmp.name) / "journal2.json"),
+            scope=scope,
+            admin=admin,
+            root=self.root,
+        )
         self.root.update()
         return app
 
@@ -130,6 +164,79 @@ class TestAppPermissionHint(AppSmokeCase):
         self.root.update()
         self.assertFalse(app._btn_disable.instate(["disabled"]))
         self.assertEqual(app._btn_elevate.winfo_manager(), "")
+
+
+class TestAppGrouping(AppSmokeCase):
+    def test_top_level_rows_are_function_groups(self):
+        app = self.app_with(build_duplicate_registry())
+        tops = app.tree.get_children()
+        self.assertEqual(len(tops), 1)
+        self.assertIn(tops[0], app._group_by_iid)
+
+    def test_group_expands_to_per_entry_rows(self):
+        app = self.app_with(build_duplicate_registry())
+        group_iid = app.tree.get_children()[0]
+        children = app.tree.get_children(group_iid)
+        self.assertEqual(len(children), 2)
+        self.assertTrue(all(c in app._item_by_iid for c in children))
+
+    def test_selecting_group_disables_all_instances(self):
+        app = self.app_with(build_duplicate_registry())
+        app.tree.selection_set(app.tree.get_children()[0])
+        self.root.update()
+        items = app.selected_items()
+        self.assertEqual(len(items), 2)
+
+        plan = app.preview_disable(items)
+        self.assertEqual(len(plan.changes), 2)
+        result = app.apply_changes(plan.changes)
+        self.assertTrue(result.ok)
+        self.assertEqual(app.controller.disabled_count(), 2)
+        self.assertEqual(app._group_by_iid[app.tree.get_children()[0]].state, "disabled")
+
+    def test_search_filters_to_matching_group_and_expands_it(self):
+        app = self.app_with(build_duplicate_registry())
+        app._query.set("baidu.exe")
+        self.root.update()
+        tops = app.tree.get_children()
+        self.assertEqual(len(tops), 1)
+        self.assertTrue(app.tree.item(tops[0], "open"))
+
+    def test_alias_button_enabled_only_for_single_group_row(self):
+        app = self.app_with(build_duplicate_registry())
+        group_iid = app.tree.get_children()[0]
+        app.tree.selection_set(group_iid)
+        self.root.update()
+        self.assertFalse(app._btn_alias.instate(["disabled"]))
+
+        child = app.tree.get_children(group_iid)[0]
+        app.tree.selection_set(child)
+        self.root.update()
+        self.assertTrue(app._btn_alias.instate(["disabled"]))
+
+
+class TestAppHideSystem(AppSmokeCase):
+    def test_checkbox_hides_windows_items_and_reports_count(self):
+        app = self.app_with(build_mixed_registry())
+        self.assertEqual(len(app.tree.get_children()), 2)
+
+        app._hide_system.set(True)
+        app.reload()
+        self.root.update()
+
+        tops = app.tree.get_children()
+        self.assertEqual(len(tops), 1)
+        self.assertEqual(app._group_by_iid[tops[0]].label, "Demo 应用")
+        self.assertIn("已隐藏 1 项", app._status.get())
+
+    def test_unchecking_restores_all_rows(self):
+        app = self.app_with(build_mixed_registry())
+        app._hide_system.set(True)
+        app.reload()
+        app._hide_system.set(False)
+        app.reload()
+        self.root.update()
+        self.assertEqual(len(app.tree.get_children()), 2)
 
 
 if __name__ == "__main__":
