@@ -1,13 +1,15 @@
+> English | [简体中文](ROADMAP.zh_CN.md)
+
 # ROADMAP
 
-- [x] M1: 核心引擎（数据模型 / 注册表后端抽象 / 扫描器 / 禁用动作 / 变更日志）+ 单元测试，提供 headless `--scan` 可验证
-- [x] M2: tkinter 图形界面（分组列表 / 搜索筛选 / 禁用启用 / 变更预览 / 一键恢复 / 权限提示）
-- [x] M3: 全机器范围 + 管理员提权重启 + README/CHANGELOG/运行脚本与任务脚本
+- [x] M1: Core engine (data model / registry backend abstraction / scanner / disable actions / change journal) + unit tests, verifiable via headless `--scan`
+- [x] M2: tkinter GUI (grouped list / search filtering / disable-enable / change preview / one-click restore / permission prompt)
+- [x] M3: Machine-wide scope + administrator elevation restart + README/CHANGELOG/run script and task script
 
 Stubs are intent, not commitment.
 
-## 后续候选（未排期）
+## Follow-up candidates (unscheduled)
 
-- DLL 发布者与图标解析（帮助用户判断菜单项归属）
-- 自定义菜单项新建 / 拖拽排序（当前明确为非目标）
-- 安装包与代码签名
+- DLL publisher and icon resolution (to help users determine which feature a menu item belongs to)
+- Creating custom menu items / drag-and-drop ordering (currently explicitly a non-goal)
+- Installer and code signing

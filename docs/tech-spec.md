@@ -1,107 +1,110 @@
-# Windows 右键菜单管理器 — 技术规格
+> English | [简体中文](tech-spec.zh_CN.md)
 
-purpose:      以非破坏、可逆的方式禁用/恢复 Windows 资源管理器右键菜单项，且不修改其他软件自身的注册信息
-user:         需要清理右键菜单、又不愿冒险删注册表键的 Windows 用户
-use-case:     列出菜单项（按功能归并）→ 选择范围 → 搜索/多选 → 预览并禁用 → 随时恢复单个或一键恢复全部
-architecture: 分层：model / registry 后端抽象 / scanner / system_items / grouping / aliases / actions / journal / elevation / ui（controller 与 tkinter 视图分离）
-stack:        Python 3.14（C:\Python314\python.exe，自带 tkinter / Tk 9.0）；仅标准库（winreg, tkinter, json, ctypes, dataclasses, unittest）
-entry:        python -m rightmenu（默认启动 GUI）；python -m rightmenu --scan --scope user|machine（headless 输出 JSON）
-contract:     见下方「契约」；RegistryBackend 与 scan/plan/apply 是稳定接口
-flow:         disable: 选中项 → plan(dry-run) → 预览确认 → apply(先整体权限预检，再逐条写入) → 记入 journal
-flow:         restore: 一键恢复全部 → journal 逆序回放 → 成功则清空 journal
-invariant:    任何代码路径都不调用 DeleteKey/DeleteKeyEx，只增删注册表「值」，绝不删「键」
-invariant:    scan 全程只读，不产生任何写入
-invariant:    不修改菜单项自身（verb/handler 键）的其它值：默认值、command、Icon、MUIVerb 等原样保留
-invariant:    enable/恢复只删除本工具记录过或明确指向该项的屏蔽值，不误删他人数据
-invariant:    未提权时对 HKLM 的写入必须先失败、后提示，不得半途留下部分改动
-constraint:   内置 Python 3.10 无 tkinter；run.cmd/run.ps1 自动定位带 tkinter 的解释器，找不到则明确提示退出
-constraint:   run.ps1 必须以 UTF-8 (BOM) 保存：Windows PowerShell 5.1 对无 BOM 的 .ps1 按 ANSI 解析，
-              含中文会乱码并破坏脚本解析（曾导致双击 run.cmd 无窗口）；run.cmd 保持纯 ASCII
-constraint:   不引入任何 pip 依赖，保证离线可跑、可复现
-convention:   TDD（先写失败测试再实现）；测试用 FakeRegistry 内存实现，不碰真实注册表
-convention:   文件名 snake_case；界面文案中文；注释仅解释「为什么」
-milestone:    M1–M3 已完成（见 docs/ROADMAP.md）
+# Windows Context Menu Manager — Technical Specification
 
-## 禁用机制
+purpose:      Disable/restore Windows Explorer context menu items in a non-destructive, reversible way, without modifying the registration information of other software itself
+user:         Windows users who need to clean up their context menu but are unwilling to risk deleting registry keys
+use-case:     list menu items (grouped by function) → choose scope → search/multi-select → preview and disable → restore a single item at any time or restore all with one click
+architecture: layered: model / registry backend abstraction / scanner / system_items / grouping / aliases / actions / journal / elevation / i18n / ui (controller separated from the tkinter view)
+stack:        Python 3.14 (C:\Python314\python.exe, ships with tkinter / Tk 9.0); standard library only (winreg, tkinter, json, ctypes, dataclasses, unittest)
+entry:        python -m rightmenu (starts the GUI by default); python -m rightmenu --scan --scope user|machine (headless JSON output)
+contract:     see "Contract" below; RegistryBackend and scan/plan/apply are stable interfaces
+flow:         disable: selected items → plan (dry-run) → preview confirmation → apply (overall permission pre-check first, then write item by item) → record to journal
+flow:         restore: restore all with one click → replay journal in reverse order → clear the journal on success
+invariant:    no code path calls DeleteKey/DeleteKeyEx; only registry "values" are added or removed, registry "keys" are never deleted
+invariant:    scan is read-only throughout and produces no writes whatsoever
+invariant:    the menu item's own other values (verb/handler key) are not modified: default value, command, Icon, MUIVerb, etc. are kept as-is
+invariant:    enable/restore deletes only the block values recorded by this tool or explicitly pointing at that item; it never accidentally deletes other people's data
+invariant:    when not elevated, writes to HKLM must fail first and prompt afterwards; no partial changes may be left behind half-way
+constraint:   the bundled Python 3.10 has no tkinter; run.cmd/run.ps1 automatically locate an interpreter with tkinter, and exit with a clear message if none is found
+constraint:   run.ps1 must be saved as UTF-8 (BOM): Windows PowerShell 5.1 parses a .ps1 without a BOM as ANSI,
+              so Chinese characters are garbled and script parsing breaks (this once caused double-clicking run.cmd to open no window); run.cmd stays pure ASCII
+constraint:   no pip dependency is introduced, guaranteeing offline runnability and reproducibility
+convention:   TDD (write a failing test before implementing); tests use the in-memory FakeRegistry implementation and never touch the real registry
+convention:   file names are snake_case; all UI text is fetched via i18n.t(), never hard-coded Chinese; comments explain only "why"
+convention:   documentation is bilingual: English is the default (`X.md`), Chinese lives alongside as `X.zh_CN.md`; every change must update both
+milestone:    M1–M3 complete (see docs/ROADMAP.md)
 
-菜单项分两类，各用对应的官方非破坏机制：
+## Disable mechanism
+
+Menu items fall into two categories, each using its corresponding official non-destructive mechanism:
 
 ```
-shell 扩展处理器  (shellex\ContextMenuHandlers\<名称>，默认值 = CLSID)
-  disable: 在对应 hive 的 Shell Extensions\Blocked 写入 REG_SZ，值名 = CLSID，数据 = 空
-  enable:  删除该值
+shell extension handler  (shellex\ContextMenuHandlers\<name>, default value = CLSID)
+  disable: write REG_SZ under the corresponding hive's Shell Extensions\Blocked, value name = CLSID, data = empty
+  enable:  delete that value
 
-static 静态动词  (shell\<verb>\command)
-  disable: 在该 verb 键下写入 REG_SZ 值 LegacyDisable（空数据）
-  enable:  删除该值
+static verb  (shell\<verb>\command)
+  disable: write a REG_SZ value LegacyDisable (empty data) under that verb key
+  enable:  delete that value
 ```
 
-CLSID 的确定：处理器键默认值若形如 `{...}` 即取之；默认值为空时取「键名」——
-系统组件常以 GUID 命名 handler 键（如 `...\ContextMenuHandlers\{596AB062-...}`），
-此时键名即 CLSID。CLSID 解析不出来时该项无法用屏蔽清单安全处理，plan 会记为 skipped。
+Determining the CLSID: if the handler key's default value is of the form `{...}`, take it; if the default value is empty, take the "key name" —
+system components often name handler keys with a GUID (e.g. `...\ContextMenuHandlers\{596AB062-...}`),
+in which case the key name itself is the CLSID. When the CLSID cannot be resolved, the item cannot be handled safely via the block list, and plan records it as skipped.
 
-Blocked 键位置：
+Blocked key locations:
 
 ```
 user    : HKCU\Software\Microsoft\Windows\CurrentVersion\Shell Extensions\Blocked
 machine : HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Shell Extensions\Blocked
 ```
 
-机制实证：`Shell Extensions\Blocked` 以 CLSID 作值名正是 Windows 自身做法，本机 HKLM 该键下存在
-既有条目 `{9421DD08-...}`（Epson 打印机扩展），格式与本工具写入一致。
-详见 `docs/decisions/2026-10-04-blocked-list-mechanism-verified.md`。
+Mechanism evidence: using a CLSID as the value name under `Shell Extensions\Blocked` is exactly what Windows itself does; on this machine that HKLM key contains
+an existing entry `{9421DD08-...}` (an Epson printer extension) whose format matches what this tool writes.
+See `docs/decisions/2026-10-04-blocked-list-mechanism-verified.md`.
 
-## 覆盖范围与提权
-
-```
-scope=user     读取 HKCU\Software\Classes\...          + HKCU Blocked      → 无需管理员
-scope=machine  追加 HKLM\SOFTWARE\Classes\...（含 Wow6432Node） + HKLM Blocked → 需要管理员
-```
-
-未提权却选择 machine 时：界面禁用写操作按钮，并提供「以管理员身份重启」，
-用 `ShellExecuteW(None, "runas", ...)` 重新拉起自身。
-
-提权重启必须显式补回 `-m rightmenu` 并把工作目录设为项目根：程序以
-`python -m rightmenu` 启动时 `sys.argv[0]` 是 `__main__.py` 的路径，argv 中
-并不包含 `-m rightmenu`，只透传 argv 会让提权后的解释器空转（表现为
-点了「以管理员身份重启」却不出现窗口）。
-
-## 系统自带判定（「只看非 Windows 自带」过滤）
-
-`ContextMenuItem.is_system` 由 `system_items.classify()` 在扫描时算出，
-依据是「该项引用的模块落在哪里」，不猜厂商。证据取原始字符串：
-static 取 `默认值 / MUIVerb / SubCommands / command / Icon`，
-shellex 取 `CLSID 键默认值 / InprocServer32`。
+## Coverage and elevation
 
 ```
-绝对路径（盘符或 UNC）
-  在 Windows 目录下                          → 自带
-  在 Program Files\Windows 或 Windows xxx\   → 自带（Defender / Photo Viewer / NT 等）
-  在 <Windows>\System32\DriverStore\ 下      → 第三方（驱动包，如 NVIDIA）
-  其它（Program Files 普通目录 / AppData / 其他盘）→ 第三方
-  同时存在多个绝对路径 → 只要有一个落在别处就判第三方
-无绝对路径时，退回裸模块名白名单（shell32.dll / rundll32.exe / notepad.exe …）→ 自带
-无任何线索（如只有显示名 ArmouryCrate、baidunetdisk）      → 第三方（宁可多显示）
+scope=user     read HKCU\Software\Classes\...          + HKCU Blocked      → no administrator needed
+scope=machine  append HKLM\SOFTWARE\Classes\... (incl. Wow6432Node) + HKLM Blocked → administrator needed
 ```
 
-要点：
+When machine is chosen without elevation: the UI disables the write-operation buttons and offers "Restart as administrator",
+relaunching itself with `ShellExecuteW(None, "runas", ...)`.
 
-- 路径必须用正则抽取而不是按空白切词：`InprocServer32` 等处的路径**不带引号且含空格**，
-  切词会把 `C:\Program Files\Windows Defender\x.dll` 截断成 `C:\Program`。
-- 绝对路径的扩展名除模块外还要含 `ps1/bat/cmd/…`：`powershell.exe -File E:\x\y.ps1`
-  的系统宿主 + 站外载荷必须判为第三方。
-- 过滤在**归并之前**对条目生效（`controller._base_items`），因此同名功能组里
-  混着的系统项会被单独剔除，组内计数与状态随之反映可见条目。
+The elevated restart must explicitly add back `-m rightmenu` and set the working directory to the project root: when the program is started as
+`python -m rightmenu`, `sys.argv[0]` is the path to `__main__.py`, and argv
+does not contain `-m rightmenu`; passing argv through alone would leave the elevated interpreter idling (manifesting as
+clicking "Restart as administrator" but no window ever appearing).
 
-实测（本机）：machine 范围 411 项中 191 项判为自带、220 项保留；
-user 范围 189 项中 0 项判为自带（HKCU 基本只装第三方项）。
+## System-built-in detection (the "show only non-Windows built-in" filter)
 
-## 扫描位置表（locations）
-
-以 `H = {user: HKCU\Software\Classes, machine: HKLM\SOFTWARE\Classes}` 为基，扫描以下键：
+`ContextMenuItem.is_system` is computed by `system_items.classify()` during the scan,
+based on "where the module referenced by the item lives", not on guessing the vendor. The evidence is taken from raw strings:
+for static, `default value / MUIVerb / SubCommands / command / Icon`,
+for shellex, `CLSID key default value / InprocServer32`.
 
 ```
-静态动词 (shell)                                  扩展处理器 (shellex\ContextMenuHandlers)
+absolute path (drive letter or UNC)
+  under the Windows directory                → built-in
+  under Program Files\Windows or Windows xxx\ → built-in (Defender / Photo Viewer / NT, etc.)
+  under <Windows>\System32\DriverStore\      → third-party (driver package, e.g. NVIDIA)
+  others (ordinary Program Files dir / AppData / other drives) → third-party
+  multiple absolute paths present at once → if any one falls elsewhere, judge third-party
+when there is no absolute path, fall back to the bare module-name whitelist (shell32.dll / rundll32.exe / notepad.exe …) → built-in
+when there is no clue at all (e.g. only a display name ArmouryCrate, baidunetdisk)      → third-party (prefer showing more)
+```
+
+Key points:
+
+- Paths must be extracted with a regex rather than split on whitespace: paths in places such as `InprocServer32` are **unquoted and contain spaces**,
+  and splitting on words would truncate `C:\Program Files\Windows Defender\x.dll` into `C:\Program`.
+- The absolute-path extension set must include not only modules but also `ps1/bat/cmd/…`: a
+  system host plus out-of-tree payload such as `powershell.exe -File E:\x\y.ps1` must be judged third-party.
+- Filtering applies to entries **before grouping** (`controller._base_items`), so system items
+  mixed into a same-named function group are removed individually, and the in-group counts and state reflect the visible entries accordingly.
+
+Measured (on this machine): of the 411 items in machine scope, 191 are judged built-in and 220 are kept;
+of the 189 items in user scope, 0 are judged built-in (HKCU basically only holds third-party items).
+
+## Scan location table (locations)
+
+With `H = {user: HKCU\Software\Classes, machine: HKLM\SOFTWARE\Classes}` as the base, the following keys are scanned:
+
+```
+static verb (shell)                                extension handler (shellex\ContextMenuHandlers)
   H\*\shell                                         H\*\shellex\ContextMenuHandlers
   H\AllFilesystemObjects\shell                      H\AllFilesystemObjects\shellex\ContextMenuHandlers
   H\Directory\shell                                 H\Directory\shellex\ContextMenuHandlers
@@ -110,89 +113,147 @@ user 范围 189 项中 0 项判为自带（HKCU 基本只装第三方项）。
   H\Drive\shell                                     H\Drive\shellex\ContextMenuHandlers
   H\LibraryFolder\shell                             H\LibraryFolder\shellex\ContextMenuHandlers
   H\DesktopBackground\shell                         H\DesktopBackground\shellex\ContextMenuHandlers
-  H\SystemFileAssociations\<类型>\shell              H\SystemFileAssociations\<类型>\shellex\ContextMenuHandlers
-  H\.<扩展名>\shell                                  H\.<扩展名>\shellex\ContextMenuHandlers
+  H\SystemFileAssociations\<type>\shell             H\SystemFileAssociations\<type>\shellex\ContextMenuHandlers
+  H\.<extension>\shell                              H\.<extension>\shellex\ContextMenuHandlers
 ```
 
-machine 范围额外读 `HKLM\SOFTWARE\Classes\Wow6432Node\...`（32 位视图）。
+machine scope additionally reads `HKLM\SOFTWARE\Classes\Wow6432Node\...` (the 32-bit view).
 
-CLSID 解析：`H\CLSID\<clsid>\InprocServer32` 默认值 → DLL 路径（展开 `%SystemRoot%` 等环境变量）；
-`H\CLSID\<clsid>` 默认值 → 友好名。
+CLSID resolution: the default value of `H\CLSID\<clsid>\InprocServer32` → the DLL path (expanding environment variables such as `%SystemRoot%`);
+the default value of `H\CLSID\<clsid>` → the friendly name.
 
-## 显示名称解析（resources.py）
+## Display name resolution (resources.py)
 
-注册表里存的往往不是可读文字，而是间接字符串 `@dll,-id`（如 `@%SystemRoot%\system32\shell32.dll,-8506`），
-直接显示用户完全认不出对应哪个菜单。扫描时统一解析成实际右键显示的文字：
-
-```
-static : MUIVerb → 默认值 → 键名
-shellex: 可读的默认值 → CLSID 键默认值（友好名）→ 键名
-```
-
-- `resolve_text` 把 `@dll,-id` 交给 `SHLoadIndirectString`（ctypes 调 shlwapi）解析；
-  普通文本原样返回；空值返回 None。
-- `strip_accelerator` 去掉快捷键标记 `&`：`打开(&O)` → `打开(O)`，`&&` 视为字面量 `&`。
-- 解析不出（DLL 未安装、资源号不存在、CLSID 键无名称）时逐级回退，最终落到键名；
-  绝不把 `@dll,-id` 原样展示。扫描只读，解析失败不抛异常。
-- `scan(..., loader=...)` 可注入解析器，测试用假 loader 保证不依赖本机 DLL。
-
-## 功能归并（grouping）与别名（aliases）
-
-同一个右键功能（如「上传到百度网盘」）往往在多个文件类型/位置各注册一份。用户真正想做的
-是「把这个功能关掉」，而不是逐个文件类型去点。因此界面在逐项视图之上加了一层**按功能归并**：
+What the registry stores is often not readable text but an indirect string `@dll,-id` (e.g. `@%SystemRoot%\system32\shell32.dll,-8506`);
+shown directly, the user has no way to tell which menu it corresponds to. During the scan it is uniformly resolved into the text actually displayed in the context menu:
 
 ```
-group_key(item)      = item.display_name.strip().casefold()      # 归并键：显示文字（忽略大小写/空白）
-group_items(items)   -> list[MenuGroup]                          # 按归并键分桶，实例多的组排在前
+static : MUIVerb → default value → key name
+shellex: readable default value → CLSID key default value (friendly name) → key name
+```
+
+- `resolve_text` hands `@dll,-id` to `SHLoadIndirectString` (calling shlwapi via ctypes) for resolution;
+  plain text is returned as-is; an empty value returns None.
+- `strip_accelerator` removes the accelerator marker `&`: `打开(&O)` → `打开(O)`, and `&&` is treated as a literal `&`.
+- When resolution fails (DLL not installed, resource ID does not exist, CLSID key has no name), it falls back level by level, ultimately landing on the key name;
+  the raw `@dll,-id` is never displayed as-is. The scan is read-only, and a resolution failure does not raise an exception.
+- `scan(..., loader=...)` allows a resolver to be injected; tests use a fake loader to guarantee no dependency on local DLLs.
+
+## Function grouping and aliases
+
+The same context-menu function (e.g. "Upload to Baidu Netdisk") is often registered once for each of several file types/locations. What the user really wants
+is to "turn this function off", not to click through every file type. The UI therefore adds a layer of **grouping by function** on top of the per-item view:
+
+```
+group_key(item)      = item.display_name.strip().casefold()      # grouping key: display text (case/whitespace insensitive)
+group_items(items)   -> list[MenuGroup]                          # bucket by grouping key, groups with more instances first
 MenuGroup            : {key, label, raw_name, items[]}
-  .total             = 组内实例数
-  .state             = "enabled" | "disabled" | "partial"        # 按已禁用实例占比
-  .locations/.kinds/.scopes/.dll_paths/.commands                 # 去重汇总，供详情展示
-  .sample_detail     = 优先取 DLL，其次命令，供列表「命令 / DLL」列
+  .total             = number of instances in the group
+  .state             = "enabled" | "disabled" | "partial"        # by proportion of disabled instances
+  .locations/.kinds/.scopes/.dll_paths/.commands                 # deduplicated summary, for detail display
+  .sample_detail     = prefer DLL, then command, for the list's "Command / DLL" column
   .has_alias         = label != raw_name
-  .needs_alias       = 组内所有项 name_is_fallback 且未设别名 → 界面提示「（注册表名）」
+  .needs_alias       = all items in the group are name_is_fallback and no alias is set → UI hints "(registry name)"
 ```
 
-界面（`ui/app.py`）用两棵树表达：**顶层一行 = 一个功能组**，展开后是**逐项明细**。
-选中功能行 → `selected_items()` 展开为组内全部条目 → 一键禁用/恢复即跨文件类型生效；
-只选明细行 → 只处理那一条（保留原细粒度能力）。`filter_groups(query)` 命中组名（含别名）时
-保留全部实例，仅命中某条明细时只保留该条，用于回答「要关掉它涉及哪几条」。
+The UI (`ui/app.py`) expresses this with two trees: **the top-level row = one function group**, and expanding it reveals the **per-item details**.
+Selecting a function row → `selected_items()` expands to all entries in the group → one-click disable/restore then takes effect across file types;
+selecting only a detail row → only that one entry is handled (preserving the original fine-grained capability). When `filter_groups(query)` matches a group name (including its alias), all
+instances are kept; when it matches only a certain detail, only that entry is kept — this is used to answer "which entries are involved in turning this off".
 
-别名（`aliases.py`）：少数功能文字由 DLL 在运行时生成，注册表里只有 `baidunetdisk` 之类，
-无法自动解析。用户可为该组设置别名，**按归并键**持久化到
-`%APPDATA%\RightMenuManager\aliases.json`；别名只覆盖展示名 `label`，不改归并键 `key`，
-因此同一功能在重扫后仍归为同组。别名不写注册表，纯本地文件。
+Aliases (`aliases.py`): a few function texts are generated at runtime by a DLL, and the registry only contains something like `baidunetdisk`,
+which cannot be resolved automatically. The user can set an alias for such a group, persisted **by group key** to
+`%APPDATA%\RightMenuManager\aliases.json`; the alias only overrides the display name `label`, not the group key `key`,
+so the same function is still grouped into the same group after a rescan. Aliases are not written to the registry — purely a local file.
 
 ```
-AliasStore(path=None)   # path=None 时仅内存（测试用）
+AliasStore(path=None)   # in-memory only when path=None (for tests)
   .get(key) -> str|None
-  .set(key, label)      # label 空白则删除该别名；随即落盘
-  .as_dict()            # 供 group_items 覆盖 label
+  .set(key, label)      # if label is blank, delete that alias; persist to disk immediately
+  .as_dict()            # for group_items to override label
 ```
 
-## 数据模型
+## Internationalization (i18n)
+
+UI text, location names, change descriptions, and CLI help are all fetched via `i18n.t(key)`; Chinese is never hard-coded in the code.
+Language set: `zh_CN`, `en` (these two first).
+
+### Mechanism: built-in baseline + external language pack overlay
+
+```
+built-in CATALOG (i18n.py) : {"ui.title": {"zh_CN": "…", "en": "…"}, …}   # fallback, still runs if lang/ is lost
+external language packs (lang/*.json): {"ui.title": "…", …}              # scanned and overlaid at startup
+lookup order               : external pack[lang][key] → built-in[lang][key] → built-in["en"][key] → key itself
+```
+
+Rationale for the choice (full comparison in `docs/decisions/2026-10-12-i18n-mechanism.md`):
+
+- gettext's `.po/.mo` requires a compilation step (the standard library does not include a `.mo` compiler), which conflicts with "zero pip dependencies, double-click and go";
+- writing all translations into Python would mean adding a language requires changing code, and a translator's mistaken quote can prevent the whole program from starting;
+- external JSON makes "adding a language = dropping in one `lang/xx.json`", without touching a single line of code, and a single corrupted file affects only that language.
+
+### Language determination and persistence
+
+```
+startup : settings.json's language → GetUserDefaultUILanguage() detection → "en" fallback
+switch  : UI dropdown → set_language() → write settings.json → controller.refresh() → rebuild the UI
+CLI     : --lang {zh_CN,en} takes priority, then the saved value, then system detection
+settings: %APPDATA%\RightMenuManager\settings.json    {"language": "zh_CN"}
+```
+
+`GetUserDefaultUILanguage()` returns a LANGID: Chinese variants (0x0804 Simplified / 0x0404 Traditional / 0x0C04 Hong Kong /
+0x1004 Singapore / 0x1404 Macau) → `zh_CN`, everything else → `en`. If the ctypes call fails, it falls back to the environment variable, and finally to `en`.
+
+### Translation boundary
+
+```
+translated    : all UI text, location names (locations), change descriptions (actions), preview text (controller),
+                restore prefixes (journal), CLI help (__main__)
+not translated: code comments and docstrings (kept in Chinese, an existing project convention)
+                enum values scope/kind/method (machine-readable tokens are always English, so automated output is unaffected by language)
+```
+
+`locations.py`'s `SCAN_TARGETS` constant is changed into a `scan_targets()` function: location names are generated with `t()` at call time,
+so after switching languages `controller.refresh()` just rescans to refresh them; the injection point of `scan(..., targets=...)` is unchanged,
+and tests can still pass in custom targets.
+
+In the JSON produced by `--scan`, `location` changes with the language (it is display text), while `scope/kind/method` are always English tokens.
+
+### Missing keys and fault tolerance
+
+- Missing key: return the key itself, never raise an exception — the UI does not crash because a translation is missing
+- `lang/` directory missing: fall back entirely to the built-in catalog; functionality is unaffected
+- Language pack JSON corrupted or not an object: ignore that file and continue starting
+- Tests assert that the key sets of `zh_CN` and `en` in `CATALOG` are exactly identical, eliminating missing translations
+
+### One trade-off
+
+The journal's `description` has its language fixed at write time, so after switching languages old records remain in the original text — historical records should indeed keep their original form;
+the `恢复：` / `撤销：` prefixes used at restore time are translated when displayed.
+
+## Data model
 
 ```
 @dataclass(frozen=True)
 ContextMenuItem:
-  id            : str          # sha1(hive + key_path)，跨会话稳定
+  id            : str          # sha1(hive + key_path), stable across sessions
   scope         : "user"|"machine"
   kind          : "static"|"shellex"
-  location      : str          # 人类可读位置，如「所有文件」「目录背景」「.txt 文件」
-  key_path      : str          # 该项所在注册表键全路径
-  display_name  : str          # 已解析的可读名称（见「显示名称解析」，逐级回退到键名）
-  key_name      : str          # 键名（verb 名或 handler 名）
-  command       : str|None     # static：command 子键默认值
-  clsid         : str|None     # shellex：CLSID
-  dll_path      : str|None     # shellex：解析出的 DLL
-  extended      : bool         # 是否仅在 Shift+右键 显示
-  disabled      : bool         # 由屏蔽值/LegacyDisable 是否存在计算得出
-  method        : "blocked"|"legacy_disable"|None   # 当前生效的禁用方式
-  name_is_fallback : bool      # display_name 是否只是回退到键名（没解析出可读文字）
+  location      : str          # human-readable location, e.g. "All Files", "Directory Background", ".txt files"
+  key_path      : str          # full path of the registry key this item lives in
+  display_name  : str          # resolved readable name (see "Display name resolution", falling back level by level to the key name)
+  key_name      : str          # key name (verb name or handler name)
+  command       : str|None     # static: command subkey default value
+  clsid         : str|None     # shellex: CLSID
+  dll_path      : str|None     # shellex: resolved DLL
+  extended      : bool         # whether it is shown only on Shift+right-click
+  disabled      : bool         # computed from whether the block value/LegacyDisable exists
+  method        : "blocked"|"legacy_disable"|None   # currently effective disable method
+  name_is_fallback : bool      # whether display_name only fell back to the key name (no readable text resolved)
   needs_admin   : bool
 ```
 
-## 契约
+## Contract
 
 ```
 class RegistryBackend(Protocol):
@@ -201,117 +262,128 @@ class RegistryBackend(Protocol):
     def read_value(self, path: str, name: str|None) -> tuple[object, int] | None
     def write_value(self, path: str, name: str|None, value: object, vtype: int) -> None
     def delete_value(self, path: str, name: str|None) -> None
-    def ensure_writable(self, path: str) -> None          # 不产生改动，只做权限预检
+    def ensure_writable(self, path: str) -> None          # no change produced, permission pre-check only
 
-scan(backend, scope, targets=SCAN_TARGETS, loader=None) -> list[ContextMenuItem]  # 只读；loader 供测试注入
-plan(items, target_disabled: bool) -> PlanResult          # 纯函数：{changes, skipped}
-apply(backend, changes, journal=None) -> ApplyResult      # 先整体预检，再逐条执行
+scan(backend, scope, targets=SCAN_TARGETS, loader=None) -> list[ContextMenuItem]  # read-only; loader is for test injection
+plan(items, target_disabled: bool) -> PlanResult          # pure function: {changes, skipped}
+apply(backend, changes, journal=None) -> ApplyResult      # overall pre-check first, then execute item by item
 ```
 
-`apply` 幂等：目标状态已达成时 `plan` 不产出变更，且删除不存在的值视为成功。
+`apply` is idempotent: when the target state has already been reached, `plan` produces no changes, and deleting a non-existent value is treated as success.
 
-## 变更日志与恢复
+## Change journal and restore
 
 ```
-journal 文件 : %APPDATA%\RightMenuManager\journal.json
-每条记录     : {ts, action, scope, key_path, value_name, item_id, description,
+journal file : %APPDATA%\RightMenuManager\journal.json
+each record  : {ts, action, scope, key_path, value_name, item_id, description,
                 had_previous, previous_value, previous_type}
-写入时机     : 每次 disable / enable 真正改变了状态后追加（空操作不记录）
-restore_all(): 按 journal 逆序回放 —— 写入前无值则删值，有值则回写原值
-清理时机     : 恢复全部成功后才清空 journal；有失败则保留以便重试
+write timing : appended after each disable / enable that actually changed state (no-ops are not recorded)
+restore_all(): replay the journal in reverse order — if there was no value before writing, delete the value; if there was, write the original value back
+cleanup timing: clear the journal only after a full successful restore; on failure, keep it so it can be retried
 ```
 
-「一键恢复全部」的语义是回到本工具改动之前的状态：只动 journal 记录过的值，
-其他软件或用户自己设置的屏蔽项一律不碰。即使用户重装本工具，只要 journal 还在，就能完整还原。
+The semantics of "restore all with one click" is to return to the state before this tool made changes: only values recorded in the journal are touched,
+and block entries set by other software or by the users themselves are never touched. Even if the user reinstalls this tool, as long as the journal still exists, a complete restoration is possible.
 
-## 预览与安全
+## Preview and safety
 
-- 应用前展示 dry-run 清单：将写入/删除的确切注册表路径与值名，用户确认后才执行
-- 批量操作前可将 journal 导出备份
-- 所有失败（权限、键不存在、值被占）单独列出，不影响其余项的既定结果
+- Before applying, show the dry-run list: the exact registry paths and value names that will be written/deleted; execute only after the user confirms
+- Before batch operations, the journal can be exported as a backup
+- All failures (permissions, key does not exist, value occupied) are listed separately, without affecting the predetermined results of the remaining items
 
-## 失败模式
+## Failure modes
 
 ```
-无 tkinter            → run.cmd 提示改用 C:\Python314\python.exe 并退出（不报栈）
-无管理员权限写 HKLM   → PermissionError 被捕获，整体不落地，界面提示提权重启
-键/值不存在           → 记为 skipped，不抛异常中断
-值名含非法字符        → 跳过并记录
-32/64 位视图          → machine 范围显式读 Wow6432Node
+no tkinter            → run.cmd suggests switching to C:\Python314\python.exe and exits (no stack trace)
+no admin rights to write HKLM → PermissionError is caught, nothing is applied at all, UI suggests restarting elevated
+key/value does not exist → recorded as skipped, no exception is raised to interrupt
+value name contains illegal characters → skipped and recorded
+32/64-bit view        → machine scope explicitly reads Wow6432Node
 ```
 
-## 文件结构
+## File structure
 
 ```
 rightmenu/
   __init__.py
   model.py         # ContextMenuItem, Scope, Kind, DisableMethod
-  registry.py      # RegistryBackend 协议 + Win32Registry（winreg 实现）
-  fake_registry.py # FakeRegistry（内存字典，供测试与 dry-run）
-  locations.py     # 扫描位置表（纯数据）
-  resources.py     # 间接字符串解析：resolve_text / strip_accelerator / load_indirect_string
-  grouping.py      # 按显示文字归并功能组：group_key / MenuGroup / group_items
-  aliases.py       # 功能别名持久化：AliasStore（%APPDATA%\RightMenuManager\aliases.json）
+  registry.py      # RegistryBackend protocol + Win32Registry (winreg implementation)
+  fake_registry.py # FakeRegistry (in-memory dict, for tests and dry-run)
+  locations.py     # scan location table (pure data)
+  resources.py     # indirect string resolution: resolve_text / strip_accelerator / load_indirect_string
+  grouping.py      # group functions by display text: group_key / MenuGroup / group_items
+  aliases.py       # function alias persistence: AliasStore (%APPDATA%\RightMenuManager\aliases.json)
   scanner.py       # scan(backend, scope) -> list[ContextMenuItem]
   actions.py       # plan / apply / disable / enable
-  journal.py       # 变更日志读写 + restore_all
+  journal.py       # change-log read/write + restore_all
   elevation.py     # is_admin() / relaunch_as_admin()
+  i18n.py          # t()/set_language()/detect_language(); built-in CATALOG + external lang/*.json overlay
   ui/__init__.py
-  ui/controller.py # 展示逻辑（不依赖 tkinter，可无界面测试）：筛选/分组/别名/plan/commit
-  ui/app.py        # tkinter 主窗口：功能组树（父=功能，子=逐项明细）
-  __main__.py      # 入口，支持 --scan（headless 输出 JSON）与默认启动 GUI
+  ui/controller.py # presentation logic (no tkinter dependency, testable headless): filter/group/alias/plan/commit
+  ui/app.py        # tkinter main window: function-group tree (parent = function, child = per-item detail)
+  __main__.py      # entry point, supports --scan (headless JSON output) and starts the GUI by default
 tests/
   test_model.py  test_registry.py  test_scanner.py  test_actions.py
   test_journal.py  test_safety.py  test_elevation.py  test_controller.py
-  test_resources.py  # 间接字符串解析与快捷键标记
-  test_grouping.py   # 按功能归并：合并/状态/别名覆盖/明细汇总
-  test_aliases.py    # 别名读写与 UTF-8 落盘、损坏文件容错
-  test_ui_smoke.py   # 界面冒烟：构建/禁用恢复/权限提示/功能组树（无 tkinter 时跳过）
+  test_resources.py  # indirect string resolution and accelerator stripping
+  test_grouping.py   # grouping by function: merge/state/alias override/detail summary
+  test_aliases.py    # alias read/write and UTF-8 persistence, corrupted-file tolerance
+  test_ui_smoke.py   # UI smoke: build/disable-restore/permission prompt/function-group tree (skipped when tkinter is absent)
+  test_i18n.py       # language detection LANGID mapping, entry fallback chain, alignment of the two catalogs' keys, settings read/write, language-pack fault tolerance
+lang/
+  zh_CN.json       # external language pack (flat key -> text); shipped with the distribution, consistent with the built-in CATALOG
+  en.json
 docs/
-  tech-spec.md     # 本文件
+  tech-spec.md     # this file (English, default)
+  tech-spec.zh_CN.md   # Chinese twin of this file
   ROADMAP.md
-  decisions/       # 关键机制实证与决策记录
-run.cmd            # 双击启动：转发到 run.ps1
-run.ps1            # 定位带 tkinter 的解释器并启动
-Makefile           # test / run / scan / scan-machine 任务
-README.md  CHANGELOG.md  .gitignore
+  ROADMAP.zh_CN.md     # Chinese twin
+  decisions/       # key mechanism evidence and decision records
+                   # (each record ships as English `X.md` + Chinese `X.zh_CN.md`)
+run.cmd            # double-click launcher: forwards to run.ps1
+run.ps1            # locates an interpreter with tkinter and launches it
+Makefile           # test / run / scan / scan-machine tasks
+README.md  README.zh_CN.md  CHANGELOG.md  CHANGELOG.zh_CN.md  .gitignore
 ```
 
-## 测试（如何证明）
+## Tests (how to prove it)
 
 ```
-1. test_safety : 全流程断言 backend 从未调用 delete_key；verb/handler 键的其它值保持不变
-2. test_actions: 禁用 shellex → Blocked 下出现以 CLSID 命名的 REG_SZ；启用后消失
-3. test_actions: 禁用 static → verb 键下出现 LegacyDisable；启用后消失
-4. test_scanner: 种子 FakeRegistry → 正确识别两类项、正确计算 disabled 与 location；
-   显示名称优先级（MUIVerb / 间接字符串 / GUID 键名）与解析失败逐级回退
-5. test_journal: restore_all 按逆序只删除记录过的值，恢复后与初始状态逐字节一致
-6. test_safety : 未提权 + machine 范围 → 抛出明确异常且 FakeRegistry 无任何写入
-7. test_actions: apply 幂等 —— 连续两次应用结果相同
-8. test_ui_smoke: 用 FakeRegistry 构造真实窗口，执行 disable→应用→restore_all 后无残留；
-   模拟非提权 + machine 范围时写操作按钮呈禁用态且出现提权入口
-9. test_grouping / test_controller / test_ui_smoke: 同一功能在多位置注册时归并为一行；
-   选中功能行一键禁用即覆盖全部实例；仅命中明细的搜索只保留该条；别名覆盖展示名且可搜索
-10. 实测：`--scan --scope machine` 输出真实条目（本机 411 项）；`Blocked` 机制结论见 docs/decisions/
+1. test_safety : asserts across the whole flow that backend never calls delete_key; the verb/handler key's other values stay unchanged
+2. test_actions: disable shellex → a REG_SZ named after the CLSID appears under Blocked; it disappears after enable
+3. test_actions: disable static → LegacyDisable appears under the verb key; it disappears after enable
+4. test_scanner: seed FakeRegistry → correctly identifies both item kinds, correctly computes disabled and location;
+   display-name priority (MUIVerb / indirect string / GUID key name) and level-by-level fallback on resolution failure
+5. test_journal: restore_all deletes only the recorded values, in reverse order, and after restore is byte-for-byte identical to the initial state
+6. test_safety : no elevation + machine scope → raises a clear exception and FakeRegistry has no writes at all
+7. test_actions: apply is idempotent — two consecutive applications yield the same result
+8. test_ui_smoke: build a real window with FakeRegistry, run disable→apply→restore_all with no residue;
+   when simulating non-elevated + machine scope, the write-operation buttons are disabled and an elevation entry point appears
+9. test_grouping / test_controller / test_ui_smoke: a function registered in multiple locations is merged into one row;
+   selecting the function row and disabling it in one click covers all instances; a search matching only a detail keeps only that entry; an alias overrides the display name and is searchable
+10. measured: `--scan --scope machine` outputs real entries (411 items on this machine); the `Blocked` mechanism conclusion is in docs/decisions/
+11. test_i18n  : language detection LANGID mapping (Chinese variants → zh_CN), value fallback chain, the two `CATALOG` key sets
+    fully aligned, external pack overlay and fault tolerance (corrupted/non-object/half-written), settings read/write and priority, `lang/*.json` with no drift from the built-in
 ```
 
-验收命令：`make test`（即 `C:\Python314\python.exe -m unittest discover -s tests`）。
+Acceptance command: `make test` (i.e. `C:\Python314\python.exe -m unittest discover -s tests`).
 
-## 实测记录
+## Measured results
 
-- 扫描性能：user 范围 189 项、machine 范围 411 项；无阻塞感，无需限流或懒加载。
-- 显示名称：扫描结果中除 1 项（其 CLSID 键本身无名称，`{474C98EE-...}`）外全部解析为可读文本；
-  修复前含大量 `@dll,-id` 原文与裸 GUID。shellex 项现已 100% 解析出 CLSID（默认值为空时取键名），
-  因此全部可用屏蔽清单禁用——此前这类项会因 `clsid is None` 被 plan 判为 skipped。
-- Wow6432Node：本机该键存在但无 shell 菜单项，故 machine 扫描中 0 条来自 32 位视图，属正确结果。
-- `restore_all` 对「非本工具写入」的屏蔽值默认不动；如需清理他人条目应另设显式功能。
+- Scan performance: 189 items in user scope, 411 items in machine scope; no sense of blocking, so no rate limiting or lazy loading is needed.
+- Display names: in the scan results, all but 1 item (whose CLSID key itself has no name, `{474C98EE-...}`) resolve to readable text;
+  before the fix there were a large number of raw `@dll,-id` strings and bare GUIDs. shellex items now resolve a CLSID 100% of the time (taking the key name when the default value is empty),
+  so all of them can be disabled via the block list — previously such items were judged skipped by plan because `clsid is None`.
+- Wow6432Node: on this machine that key exists but has no shell menu items, so 0 of the machine scan entries come from the 32-bit view, which is the correct result.
+- `restore_all` leaves block values "not written by this tool" untouched by default; cleaning up other people's entries would require a separate explicit feature.
 
-## 非目标 / deferred
+## Non-goals / deferred
 
 ```
-- 不做“真删除注册表键”（用户已确认只做可逆禁用/恢复）
-- 不做自定义菜单项新建 / 拖拽排序
-- 不做多语言（界面中文）
-- 不做安装包、代码签名
-- DLL 发布者与图标解析属加分项，未排期
+- no "true deletion of registry keys" (the user has confirmed only reversible disable/restore)
+- no creating custom menu items / drag-and-drop reordering
+- i18n: zh_CN / en are supported, via "built-in baseline + external language pack overlay" (see the "Internationalization (i18n)" section);
+  more languages just need a `lang/<code>.json` add-on, no code change required
+- no installer, no code signing
+- DLL publisher and icon resolution are nice-to-haves, not scheduled
 ```

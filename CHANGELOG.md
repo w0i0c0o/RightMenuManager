@@ -1,53 +1,73 @@
+> English | [简体中文](CHANGELOG.zh_CN.md)
+
 # Changelog
 
-本文件记录所有值得注意的变更。格式参考 Keep a Changelog。
+This file records all notable changes. Format based on Keep a Changelog.
 
-## [Unreleased]
+## [0.2.0] - 2026-10-17
 
 ### Added
-- 项目脚手架：包结构、测试目录、运行脚本与任务脚本
-- 数据模型 `ContextMenuItem`：稳定 id、scope/kind/method 枚举与派生字段
-- 注册表后端抽象 `RegistryBackend`，提供 `Win32Registry`（真实）与 `FakeRegistry`（内存）
-- 扫描器：按位置表枚举静态菜单项与 Shell 扩展处理器，计算 disabled 与 location
-- 禁用/启用动作：shellex 走 `Shell Extensions\Blocked`，static 走 `LegacyDisable`；`apply` 幂等且写入前统一权限预检
-- 变更日志与「一键恢复全部」：只回放本工具记录过的值，恢复成功后清空日志
-- tkinter 图形界面：范围切换、搜索筛选、多选禁用/恢复、变更预览对话框、条目详情
-- 管理员提权：`is_admin()` 检测与 `ShellExecuteW(runas)` 提权重启；全机器范围未提权时置灰写操作并提示
-- 全机器范围扫描：`HKLM\SOFTWARE\Classes` 及 32 位 `Wow6432Node`
-- 安全不变式测试：全流程断言不删注册表键、不触碰其他软件的注册信息
-- 界面冒烟测试：构建窗口、禁用→应用→恢复回到初始、权限提示状态
-- 启动脚本编码回归测试：`run.ps1` 必须带 UTF-8 BOM 或为纯 ASCII
-- 功能归并（`grouping.py`）：按右键显示文字把同一功能在多个文件类型/位置注册的条目
-  归并为 `MenuGroup`；界面顶层一行 = 一个功能，选中即一键禁用/恢复该功能在**所有文件类型**下的
-  全部条目，展开后仍可按文件类型逐项控制
-- 功能别名（`aliases.py`）：为无法自动解析名称的功能（如百度网盘，注册表里只有 `baidunetdisk`）
-  设置别名，按归并键持久化到 `%APPDATA%\RightMenuManager\aliases.json`，之后可按别名搜索、归并、一键开关
-- 界面：新增「设置别名…」「展开全部」「折叠全部」按钮；功能行详情列出「要关闭它需处理哪几条」的
-  确切注册表路径；搜索命中功能名时保留全部实例、仅命中某条明细时只保留该条
-- 模型新增 `name_is_fallback`：标记名称只是回退到键名，界面据此提示「（未识别，可设置别名）」
-- 测试：新增 `test_grouping.py`、`test_aliases.py`，并扩充 controller / scanner / UI 冒烟用例（131 → 170 项）
-- 「只看非 Windows 自带」勾选框：新增 `system_items.py` 与 `ContextMenuItem.is_system`，
-  按「引用的模块落在哪里」判定（Windows 目录 / `Program Files\Windows*` / 裸系统模块名算自带；
-  `DriverStore`、`Program Files` 普通目录、`AppData` 算第三方；无线索时不隐藏）。
-  过滤在归并前对条目生效，状态栏显示本次隐藏数量。实测 machine 范围 411 项中 191 项判为自带
-- 测试：新增 `test_system_items.py`，并扩充 controller / UI 冒烟用例（170 → 198 项）
-- 许可证：采用 **GPL-3.0**，加入官方全文 `LICENSE`，README 补充中文许可说明与版权声明
-- 可移植打包：新增 `package_portable.ps1`，一键挑出运行必需文件（`run.cmd` / `run.ps1` /
-  `rightmenu\` 下 `.py` / `README.md`）到发行目录 `release\`，自动生成 `VERSION.txt`
-  （版本号、打包时间、运行要求），可选 `-Zip`；README 新增「移植到其他机器」章节，
-  明确哪些要带、哪些不要带
+- Internationalization (i18n): added `rightmenu/i18n.py` and `tests/test_i18n.py`; UI text, location names, change descriptions,
+  preview text, and CLI help all obtain their wording via `i18n.t(key)`. Built-in **Simplified Chinese** and **English**, defaulting to following the system language
+  (Chinese variants of `GetUserDefaultUILanguage()` → `zh_CN`, everything else → `en`); the toolbar "Language:" dropdown can
+  switch at any time and records to `%APPDATA%\RightMenuManager\settings.json`; the command line adds `--lang`
+- The i18n mechanism is "**built-in baseline + external language pack overlay**": the built-in `CATALOG` serves as a fallback (it still runs even if `lang\` is lost),
+  and external `lang\<code>.json` files are scanned and overlaid at startup. The lookup chain is external pack → built-in[target language] → built-in[en] → the key itself;
+  adding a language only requires dropping in a JSON file, without touching the code, and a half-finished language pack automatically falls back to English. Fault tolerance: a missing word returns the key itself,
+  a damaged/non-object/non-string value in a language pack is ignored entry by entry, a missing `lang\` does not affect startup, and a BOM prefix can also be read
+- Dynamic location names: the `SCAN_TARGETS` constant in `locations.py` was changed to a `scan_targets()` function; location names are
+  generated via `t()` at call time, so re-scanning after switching languages refreshes them; the `scan(..., targets=...)` injection point is unchanged
+- Documentation is now bilingual: **English is the default** (`README.md`, `CHANGELOG.md`, `docs/tech-spec.md`, `docs/ROADMAP.md`,
+  `docs/decisions/*.md`), and each file has a Chinese twin (`X.zh_CN.md`) with a language-switch link on the first line;
+  every future change must update both. `package_portable.ps1` now ships both `README.md` and `README.zh_CN.md`
+- License: adopts **GPL-3.0**, adds the official full text `LICENSE`, and README adds a Chinese license explanation and copyright notice
+- Decision record: `docs/decisions/2026-10-12-i18n-mechanism.md` (gettext / pure built-in dict / external JSON comparison and selection)
+
+## [0.1.0] - 2026-10-04
+
+### Added
+- Project scaffolding: package structure, test directory, run script and task script
+- Data model `ContextMenuItem`: stable id, scope/kind/method enums and derived fields
+- Registry backend abstraction `RegistryBackend`, providing `Win32Registry` (real) and `FakeRegistry` (in-memory)
+- Scanner: enumerates static menu items and Shell extension handlers by location table, computing disabled and location
+- Disable/enable actions: shellex goes through `Shell Extensions\Blocked`, static goes through `LegacyDisable`; `apply` is idempotent and performs a unified permission pre-check before writing
+- Change journal and "restore all in one click": only replays values recorded by this tool, and clears the journal after a successful restore
+- tkinter GUI: scope switching, search filtering, multi-select disable/restore, change preview dialog, item details
+- Administrator elevation: `is_admin()` detection and elevation restart via `ShellExecuteW(runas)`; when the machine-wide scope is not elevated, write operations are greyed out with a prompt
+- Machine-wide scope scanning: `HKLM\SOFTWARE\Classes` and the 32-bit `Wow6432Node`
+- Safety invariant tests: assert throughout the whole flow that registry keys are not deleted and other software's registry information is not touched
+- UI smoke tests: build the window, disable → apply → restore back to the initial state, permission prompt state
+- Startup script encoding regression test: `run.ps1` must have a UTF-8 BOM or be pure ASCII
+- Feature grouping (`grouping.py`): groups entries of the same feature registered across multiple file types/locations by their context-menu display text
+  into a `MenuGroup`; one top-level row in the UI = one feature, selecting it disables/restores in one click all
+  entries of that feature under **all file types**, and after expanding they can still be controlled item by item by file type
+- Feature aliases (`aliases.py`): sets aliases for features whose names cannot be resolved automatically (e.g. Baidu Netdisk, which only appears as `baidunetdisk` in the registry),
+  persisted by grouping key to `%APPDATA%\RightMenuManager\aliases.json`, after which they can be searched, grouped, and toggled in one click by alias
+- UI: added "Set alias…", "Expand all", "Collapse all" buttons; the feature row details list the
+  exact registry paths for "which entries must be handled to turn it off"; when a search hits a feature name, all instances are kept, and when only a detail entry is hit, only that entry is kept
+- Model adds `name_is_fallback`: marks that the name is merely a fallback to the key name, based on which the UI prompts "(unrecognized, an alias can be set)"
+- Tests: added `test_grouping.py`, `test_aliases.py`, and expanded controller / scanner / UI smoke cases (131 → 170 items)
+- "Show only non-Windows built-in" checkbox: added `system_items.py` and `ContextMenuItem.is_system`,
+  determined by "where the referenced module resides" (Windows directory / `Program Files\Windows*` / bare system module names count as built-in;
+  `DriverStore`, ordinary `Program Files` directories, `AppData` count as third-party; when there is no clue, it is not hidden).
+  Filtering takes effect on entries before grouping, and the status bar shows the number hidden this time. Measured: of 411 items in the machine scope, 191 were judged built-in
+- Tests: added `test_system_items.py`, and expanded controller / UI smoke cases (170 → 198 items)
+- Portable packaging: added `package_portable.ps1`, which in one click picks out the files required to run (`run.cmd` / `run.ps1` /
+  `.py` under `rightmenu\` / `.json` under `lang\` / `README.md`) into the distribution directory `release\`, automatically generates
+  `VERSION.txt` (version number, packaging time, run requirements), with an optional `-Zip`; README adds a "Migrating to other machines" section,
+  clarifying which files to bring and which not to
 
 ### Fixed
-- 从桌面快捷方式或其他工作目录启动报 `No module named rightmenu`：`run.ps1` 未切换工作目录，
-  而 `python -m rightmenu` 依赖当前目录在 `sys.path` 中。现于启动前 `Set-Location $PSScriptRoot`，
-  目录放在任意路径均可启动
-- 双击 `run.cmd` 无任何窗口：`run.ps1` 含中文但无 UTF-8 BOM，Windows PowerShell 5.1
-  按 ANSI 解析导致中文乱码并破坏字符串引号，整个脚本解析失败。现改为 UTF-8 (BOM) 保存，
-  并在 `run.cmd` 中于启动失败时暂停以显示错误信息
-- 「以管理员身份重启」后不出现窗口：提权时只透传了 `sys.argv[1:]`，而 `-m rightmenu`
-  并不在 argv 里（以 `python -m rightmenu` 启动时 `argv[0]` 是 `__main__.py` 路径），
-  于是提权后拉起的是一个空解释器。现显式补回 `-m rightmenu` 并把工作目录设为项目根
+- Starting from a desktop shortcut or another working directory reported `No module named rightmenu`: `run.ps1` did not switch the working directory,
+  while `python -m rightmenu` depends on the current directory being in `sys.path`. Now `Set-Location $PSScriptRoot` is done before startup, so
+  it can start with the directory placed at any path
+- Double-clicking `run.cmd` produced no window at all: `run.ps1` contained Chinese but had no UTF-8 BOM, so Windows PowerShell 5.1
+  parsed it as ANSI, garbling the Chinese and breaking string quotes, and the whole script failed to parse. Now it is saved as UTF-8 (BOM),
+  and `run.cmd` pauses on startup failure to display the error message
+- No window appeared after "Restart as administrator": during elevation only `sys.argv[1:]` was passed through, but `-m rightmenu`
+  is not in argv (when started as `python -m rightmenu`, `argv[0]` is the `__main__.py` path),
+  so after elevation an empty interpreter was launched. Now `-m rightmenu` is explicitly added back and the working directory is set to the project root
 
 ### Notes
-- `Shell Extensions\Blocked` 以 CLSID 作值名的机制已在本机实测确认，见 `docs/decisions/2026-10-04-blocked-list-mechanism-verified.md`
-- 扫描性能实测：用户范围 192 项约 231ms，机器范围 414 项约 412ms，无需限流或懒加载
+- The mechanism of `Shell Extensions\Blocked` using CLSIDs as value names has been confirmed by actual testing on this machine, see `docs/decisions/2026-10-04-blocked-list-mechanism-verified.md`
+- Scan performance measured: about 231ms for 192 items in the user scope, about 412ms for 414 items in the machine scope; no throttling or lazy loading needed

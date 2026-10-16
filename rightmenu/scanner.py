@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 
-from rightmenu.locations import SCAN_TARGETS, ScanTarget
+from rightmenu.locations import ScanTarget, scan_targets
 from rightmenu.model import (
     LEGACY_DISABLE_VALUE,
     ContextMenuItem,
@@ -40,9 +40,11 @@ def blocked_key_path(scope: Scope) -> str:
 def scan(
     backend: RegistryBackend,
     scope: Scope = Scope.USER,
-    targets: tuple[ScanTarget, ...] = SCAN_TARGETS,
+    targets: tuple[ScanTarget, ...] | None = None,
     loader: Loader | None = None,
 ) -> list[ContextMenuItem]:
+    if targets is None:
+        targets = scan_targets()
     items: list[ContextMenuItem] = []
     for root, item_scope in classes_roots(scope):
         for target in targets:

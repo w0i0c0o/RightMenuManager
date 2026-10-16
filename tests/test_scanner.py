@@ -2,11 +2,18 @@ import os
 import unittest
 from unittest import mock
 
+from rightmenu import i18n
 from rightmenu.fake_registry import FakeRegistry
 from rightmenu.model import DisableMethod, Kind, Scope
 from rightmenu.registry import REG_SZ
 from rightmenu.resources import resolve_text
 from rightmenu.scanner import blocked_key_path, scan
+
+
+def setUpModule() -> None:
+    # 位置名是展示文案，断言依赖中文；固定语言以免受系统/其他用例影响。
+    i18n.configure(language="zh_CN")
+
 
 CLASSES = r"HKCU\Software\Classes"
 HKLM_CLASSES = r"HKLM\SOFTWARE\Classes"

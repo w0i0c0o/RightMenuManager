@@ -1,5 +1,6 @@
 # Assemble a portable copy of the runtime files, ready to move to another Windows machine.
-# Runtime set = run.cmd + run.ps1 + rightmenu\ (source only; no __pycache__, no tests).
+# Runtime set = run.cmd + run.ps1 + README.md / README.zh_CN.md
+#               + rightmenu\ (source only; no __pycache__, no tests) + lang\*.json.
 #
 # Usage:
 #   powershell -ExecutionPolicy Bypass -File package_portable.ps1
@@ -15,8 +16,11 @@ param(
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 
-$runtimeFiles = @('run.cmd', 'run.ps1', 'README.md')
+$runtimeFiles = @('run.cmd', 'run.ps1', 'README.md', 'README.zh_CN.md')
 $runtimeDirs = @('rightmenu')
+# External language packs: lang\<code>.json. Optional at runtime (built-in CATALOG is the
+# fallback), but shipping them keeps a fresh machine's dropdown populated.
+$langDir = 'lang'
 
 if (Test-Path -LiteralPath $Destination) {
     Remove-Item -LiteralPath $Destination -Recurse -Force
@@ -41,6 +45,15 @@ foreach ($dir in $runtimeDirs) {
             New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force | Out-Null
             Copy-Item -LiteralPath $_.FullName -Destination $target
         }
+}
+
+# Copy external language packs (lang\*.json), if present.
+$langSource = Join-Path $root $langDir
+if (Test-Path -LiteralPath $langSource) {
+    $langTarget = Join-Path $Destination $langDir
+    New-Item -ItemType Directory -Path $langTarget -Force | Out-Null
+    Get-ChildItem -LiteralPath $langSource -File -Filter '*.json' |
+        ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $langTarget }
 }
 
 # Stamp the release with version + build date, read from rightmenu\__init__.py.

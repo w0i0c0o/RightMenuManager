@@ -10,6 +10,7 @@ from rightmenu.actions import ApplyResult, PlanResult
 from rightmenu.aliases import AliasStore
 from rightmenu.elevation import is_admin
 from rightmenu.grouping import MenuGroup, group_items
+from rightmenu.i18n import t
 from rightmenu.journal import Journal
 from rightmenu.model import ContextMenuItem, Scope
 from rightmenu.registry import RegistryBackend
@@ -167,17 +168,18 @@ def _haystack(item: ContextMenuItem) -> str:
 
 def build_preview_text(result: PlanResult) -> str:
     """把 dry-run 结果渲染成用户可读的预览文本。"""
-    lines = ["即将修改以下注册表值（只增删值，不删键）：", ""]
+    lines = [t("preview.heading"), ""]
     if not result.changes:
-        lines.append("（没有需要变更的项）")
+        lines.append(t("preview.empty"))
     for change in result.changes:
-        verb = "写入" if change.action is actions.Action.WRITE else "删除"
-        lines.append(f"· {change.description}")
-        lines.append(f"    操作: {verb}    值名: {change.value_name or '(默认)'}")
-        lines.append(f"    路径: {change.key_path}")
+        verb = t("preview.verb_write") if change.action is actions.Action.WRITE else t("preview.verb_delete")
+        value_name = change.value_name or t("preview.default_value")
+        lines.append(t("preview.change_line", description=change.description))
+        lines.append(t("preview.change_meta", verb=verb, value_name=value_name))
+        lines.append(t("preview.change_path", path=change.key_path))
     if result.skipped:
         lines.append("")
-        lines.append("以下项已跳过（不会修改注册表）：")
+        lines.append(t("preview.skipped_heading"))
         for item, reason in result.skipped:
-            lines.append(f"· {item.display_name}：{reason}")
+            lines.append(t("preview.skipped_line", name=item.display_name, reason=reason))
     return "\n".join(lines)

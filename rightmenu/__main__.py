@@ -6,7 +6,8 @@ import argparse
 import json
 import sys
 
-from rightmenu import __version__
+from rightmenu import __version__, i18n
+from rightmenu.i18n import t
 from rightmenu.model import ContextMenuItem, Scope
 from rightmenu.registry import Win32Registry
 from rightmenu.scanner import scan
@@ -34,20 +35,38 @@ def to_dict(item: ContextMenuItem) -> dict:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="rightmenu",
-        description="以非破坏、可逆的方式管理 Windows 右键菜单项。",
+        description=t("cli.description"),
     )
     parser.add_argument("--version", action="version", version=f"rightmenu {__version__}")
-    parser.add_argument("--scan", action="store_true", help="无界面模式：扫描并输出 JSON")
+    parser.add_argument("--scan", action="store_true", help=t("cli.scan_help"))
     parser.add_argument(
         "--scope",
         choices=[Scope.USER.value, Scope.MACHINE.value],
         default=Scope.USER.value,
-        help="扫描范围（默认 user）",
+        help=t("cli.scope_help"),
+    )
+    parser.add_argument(
+        "--lang",
+        choices=i18n.available_languages(),
+        default=None,
+        help=t("cli.lang_help"),
     )
     return parser
 
 
+def _prescan_language(argv: list[str]) -> str | None:
+    """先于 argparse 取 --lang：帮助文本本身也要按所选语言生成。"""
+    for index, arg in enumerate(argv):
+        if arg == "--lang" and index + 1 < len(argv):
+            return argv[index + 1]
+        if arg.startswith("--lang="):
+            return arg.split("=", 1)[1]
+    return None
+
+
 def main(argv: list[str] | None = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    i18n.configure(language=_prescan_language(argv))
     args = build_parser().parse_args(argv)
 
     if args.scan:

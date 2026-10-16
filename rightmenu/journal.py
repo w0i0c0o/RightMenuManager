@@ -13,6 +13,7 @@ from datetime import datetime
 from pathlib import Path
 
 from rightmenu.actions import Action, ApplyResult, Change
+from rightmenu.i18n import t
 from rightmenu.model import Scope
 from rightmenu.registry import RegistryBackend
 
@@ -127,6 +128,7 @@ class Journal:
 
     @staticmethod
     def _as_change(entry: JournalEntry) -> Change:
+        # 记录的 description 是写入时的语言；恢复前缀则在显示时按当前语言翻译。
         if entry.had_previous:
             return Change(
                 Action.WRITE,
@@ -136,7 +138,7 @@ class Journal:
                 entry.previous_type,
                 entry.item_id,
                 Scope(entry.scope),
-                f"恢复：{entry.description}",
+                t("journal.restore_prefix", v=entry.description),
             )
         return Change(
             Action.DELETE,
@@ -146,5 +148,5 @@ class Journal:
             None,
             entry.item_id,
             Scope(entry.scope),
-            f"撤销：{entry.description}",
+            t("journal.undo_prefix", v=entry.description),
         )

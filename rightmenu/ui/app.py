@@ -1,6 +1,7 @@
 """tkinter 视图。
 
 只负责画界面与收集用户操作；所有判断逻辑都在 ui/controller.py。
+界面文案一律经 :func:`rightmenu.i18n.t` 取词，切换语言时整窗重建。
 
 列表按「功能」归并成两层：
 
@@ -16,33 +17,31 @@ from __future__ import annotations
 import tkinter as tk
 from tkinter import messagebox, simpledialog, ttk
 
+from rightmenu import i18n
 from rightmenu.elevation import relaunch_as_admin
 from rightmenu.grouping import MenuGroup
+from rightmenu.i18n import t
 from rightmenu.journal import Journal
 from rightmenu.model import ContextMenuItem, Kind, Scope
 from rightmenu.registry import Win32Registry
 from rightmenu.ui.controller import Controller, build_preview_text
 
-SCOPE_LABELS = {
-    Scope.USER: "仅当前用户（无需管理员）",
-    Scope.MACHINE: "当前用户 + 全机器（需要管理员）",
-}
-KIND_LABELS = {
-    Kind.STATIC: "菜单项",
-    Kind.SHELLEX: "扩展处理器",
-}
-STATE_LABELS = {
-    "enabled": "启用中",
-    "disabled": "已禁用",
-    "partial": "部分禁用",
-}
+#: 列标识与固定宽度（标题随语言变化，宽度不变）。
 COLUMNS = (
-    ("state", "状态", 90),
-    ("location", "位置", 160),
-    ("kind", "类型 / 条目", 110),
-    ("detail", "命令 / DLL", 400),
+    ("state", 90),
+    ("location", 160),
+    ("kind", 110),
+    ("detail", 400),
 )
 TREE_COLUMN = "#0"
+
+
+def kind_label(kind: Kind) -> str:
+    return t(f"kind.{kind.value}")
+
+
+def state_label(state: str) -> str:
+    return t(f"state.{state}")
 
 
 class App:
@@ -61,7 +60,7 @@ class App:
             admin=admin,
         )
         self.root = root if root is not None else tk.Tk()
-        self.root.title("Windows 右键菜单管理器")
+        self.root.title(t("app.title"))
         self.root.geometry("1180x680")
         self.root.minsize(960, 500)
 
@@ -69,10 +68,15 @@ class App:
         self._scope_var = tk.StringVar(value=self.controller.scope.value)
         self._hide_system = tk.BooleanVar(value=False)
         self._status = tk.StringVar()
+        self._lang_label = tk.StringVar()
+        self._lang_labels: list[str] = []
+        self._lang_code_by_label: dict[str, str] = {}
         self._group_by_iid: dict[str, MenuGroup] = {}
         self._item_by_iid: dict[str, ContextMenuItem] = {}
 
         self._build()
+        # 只注册一次：_rebuild() 会重跑 _build()，在 _build 里注册会随每次切换语言累积回调。
+        self._query.trace_add("write", lambda *_: self.reload())
         self.reload()
 
     # ---- 界面构建 ----
@@ -85,11 +89,11 @@ class App:
         toolbar.grid(row=0, column=0, sticky="ew")
         toolbar.columnconfigure(4, weight=1)
 
-        ttk.Label(toolbar, text="范围：").grid(row=0, column=0, padx=(0, 4))
+        ttk.Label(toolbar, text=t("toolbar.scope")).grid(row=0, column=0, padx=(0, 4))
         for index, scope in enumerate((Scope.USER, Scope.MACHINE), start=1):
             ttk.Radiobutton(
                 toolbar,
-                text=SCOPE_LABELS[scope],
+                text=t(f"scope.{scope.value}"),
                 value=scope.value,
                 variable=self._scope_var,
                 command=self._on_scope_change,
@@ -97,21 +101,21 @@ class App:
 
         ttk.Checkbutton(
             toolbar,
-            text="只看非 Windows 自带",
+            text=t("toolbar.hide_system"),
             variable=self._hide_system,
             command=self.reload,
         ).grid(row=0, column=3, padx=(0, 16), sticky="w")
 
         search_box = ttk.Frame(toolbar)
         search_box.grid(row=0, column=4, sticky="e")
-        ttk.Label(search_box, text="搜索：").pack(side="left")
+        ttk.Label(search_box, text=t("toolbar.search")).pack(side="left")
         ttk.Entry(search_box, textvariable=self._query, width=28).pack(side="left")
-        self._query.trace_add("write", lambda *_: self.reload())
+
+        self._build_language_box(toolbar)
 
         ttk.Label(
             self.root,
-            text="列表按「功能」归并：选中一行即可一次性关闭/显示该功能在所有文件类型下的全部条目；"
-            "展开后可按文件类型逐项控制。",
+            text=t("banner.grouping"),
             padding=(12, 0, 12, 4),
             foreground="#555555",
         ).grid(row=1, column=0, sticky="w")
@@ -119,21 +123,21 @@ class App:
         actions = ttk.Frame(self.root, padding=(10, 0, 10, 6))
         actions.grid(row=3, column=0, sticky="ew")
 
-        self._btn_disable = ttk.Button(actions, text="禁用选中项", command=self._run_disable)
+        self._btn_disable = ttk.Button(actions, text=t("btn.disable"), command=self._run_disable)
         self._btn_disable.pack(side="left")
-        self._btn_enable = ttk.Button(actions, text="恢复选中项", command=self._run_enable)
+        self._btn_enable = ttk.Button(actions, text=t("btn.enable"), command=self._run_enable)
         self._btn_enable.pack(side="left", padx=6)
-        self._btn_alias = ttk.Button(actions, text="设置别名…", command=self._run_alias)
+        self._btn_alias = ttk.Button(actions, text=t("btn.alias"), command=self._run_alias)
         self._btn_alias.pack(side="left", padx=(6, 0))
-        self._btn_restore = ttk.Button(actions, text="一键恢复全部改动", command=self._run_restore)
+        self._btn_restore = ttk.Button(actions, text=t("btn.restore"), command=self._run_restore)
         self._btn_restore.pack(side="left", padx=(18, 6))
-        ttk.Button(actions, text="刷新", command=self.reload).pack(side="left")
-        ttk.Button(actions, text="展开全部", command=self.expand_all).pack(side="left", padx=6)
-        ttk.Button(actions, text="折叠全部", command=self.collapse_all).pack(side="left")
+        ttk.Button(actions, text=t("btn.refresh"), command=self.reload).pack(side="left")
+        ttk.Button(actions, text=t("btn.expand_all"), command=self.expand_all).pack(side="left", padx=6)
+        ttk.Button(actions, text=t("btn.collapse_all"), command=self.collapse_all).pack(side="left")
 
         self._hint = ttk.Label(actions, text="", foreground="#b34700")
         self._hint.pack(side="left", padx=16)
-        self._btn_elevate = ttk.Button(actions, text="以管理员身份重启", command=self.elevate)
+        self._btn_elevate = ttk.Button(actions, text=t("btn.elevate"), command=self.elevate)
 
         table = ttk.Frame(self.root, padding=(10, 0, 10, 6))
         table.grid(row=2, column=0, sticky="nsew")
@@ -146,10 +150,10 @@ class App:
             show="tree headings",
             selectmode="extended",
         )
-        self.tree.heading(TREE_COLUMN, text="功能 / 菜单项")
+        self.tree.heading(TREE_COLUMN, text=t("col.group"))
         self.tree.column(TREE_COLUMN, width=340, anchor="w", stretch=False)
-        for key, title, width in COLUMNS:
-            self.tree.heading(key, text=title)
+        for key, width in COLUMNS:
+            self.tree.heading(key, text=t(f"col.{key}"))
             self.tree.column(key, width=width, anchor="w", stretch=(key == "detail"))
         self.tree.grid(row=0, column=0, sticky="nsew")
         self.tree.tag_configure("disabled", foreground="#8a8a8a")
@@ -165,6 +169,26 @@ class App:
         ttk.Label(self.root, textvariable=self._status, padding=(12, 4)).grid(
             row=4, column=0, sticky="ew"
         )
+
+    def _build_language_box(self, toolbar: ttk.Frame) -> None:
+        box = ttk.Frame(toolbar)
+        box.grid(row=0, column=5, sticky="e", padx=(12, 0))
+        ttk.Label(box, text=t("toolbar.language")).pack(side="left")
+
+        codes = i18n.available_languages()
+        self._lang_labels = [i18n.language_label(code) for code in codes]
+        self._lang_code_by_label = dict(zip(self._lang_labels, codes))
+        self._lang_label.set(i18n.language_label(i18n.get_language()))
+
+        combo = ttk.Combobox(
+            box,
+            state="readonly",
+            width=16,
+            values=self._lang_labels,
+            textvariable=self._lang_label,
+        )
+        combo.pack(side="left")
+        combo.bind("<<ComboboxSelected>>", self._on_language_change)
 
     # ---- 数据刷新 ----
 
@@ -212,14 +236,14 @@ class App:
         return f"i::{item.id}"
 
     def _group_text(self, group: MenuGroup) -> str:
-        suffix = "（注册表名）" if group.needs_alias else ""
+        suffix = t("group.needs_alias_suffix") if group.needs_alias else ""
         return f"{group.label}{suffix}"
 
     def _group_values(self, group: MenuGroup) -> tuple:
         return (
-            STATE_LABELS[group.state],
-            f"{len(group.locations)} 处位置",
-            f"{group.total} 项",
+            state_label(group.state),
+            t("group.locations_count", n=len(group.locations)),
+            t("group.items_count", n=group.total),
             group.sample_detail,
         )
 
@@ -234,25 +258,25 @@ class App:
 
     def _item_values(self, item: ContextMenuItem) -> tuple:
         return (
-            "已禁用" if item.disabled else "启用中",
+            state_label("disabled") if item.disabled else state_label("enabled"),
             item.location,
-            KIND_LABELS[item.kind],
+            kind_label(item.kind),
             item.command or item.dll_path or "",
         )
 
     def _update_status(self, query: str, groups: list[MenuGroup], hide_system: bool) -> None:
         visible = self.controller.visible_items(query, hide_system)
-        scope_text = "仅当前用户" if self.controller.scope is Scope.USER else "全机器"
+        scope_key = "scope.user.short" if self.controller.scope is Scope.USER else "scope.machine.short"
         parts = [
-            f"范围：{scope_text}",
-            f"功能 {len(groups)} 个",
-            f"条目 {len(visible)} 项",
-            f"已禁用 {sum(1 for item in visible if item.disabled)} 项",
+            t("status.scope", scope=t(scope_key)),
+            t("status.groups", n=len(groups)),
+            t("status.items", n=len(visible)),
+            t("status.disabled", n=sum(1 for item in visible if item.disabled)),
         ]
         if hide_system:
-            parts.append(f"已隐藏 {self.controller.hidden_system_count()} 项 Windows 自带")
+            parts.append(t("status.hidden_system", n=self.controller.hidden_system_count()))
         if not self.controller.admin:
-            parts.append("当前未提权")
+            parts.append(t("status.not_admin"))
         self._status.set("    ".join(parts))
 
     # ---- 权限状态 ----
@@ -268,7 +292,7 @@ class App:
 
         needs_elevation = self.controller.scope is Scope.MACHINE and not self.controller.admin
         if needs_elevation:
-            self._hint.configure(text="全机器范围需要管理员权限才能修改")
+            self._hint.configure(text=t("hint.needs_admin"))
             self._btn_elevate.pack(side="left", padx=6)
         else:
             self._hint.configure(text="")
@@ -276,6 +300,23 @@ class App:
 
     def _on_scope_change(self) -> None:
         self.controller.set_scope(Scope(self._scope_var.get()))
+        self.reload()
+
+    def _on_language_change(self, _event=None) -> None:
+        code = self._lang_code_by_label.get(self._lang_label.get())
+        if not code or code == i18n.get_language():
+            return
+        i18n.set_language(code)
+        self._rebuild()
+
+    def _rebuild(self) -> None:
+        """切换语言后整窗重建：文案与位置名都要按新语言重新取词。"""
+        for child in self.root.winfo_children():
+            child.destroy()
+        self._group_by_iid = {}
+        self._item_by_iid = {}
+        self.controller.refresh()
+        self._build()
         self.reload()
 
     # ---- 展开 / 折叠 ----
@@ -323,28 +364,32 @@ class App:
         try:
             result = self.controller.commit(changes)
         except PermissionError as exc:
-            self._error(f"权限不足：{exc}\n请点击「以管理员身份重启」后重试。")
+            self._error(t("err.permission", err=exc))
             return None
         self.reload()
-        failed = f"，{len(result.failed)} 项失败" if result.failed else ""
-        self._status.set(f"已应用 {len(result.applied)} 项变更{failed}")
+        if result.failed:
+            self._status.set(
+                t("msg.applied_failed", n=len(result.applied), m=len(result.failed))
+            )
+        else:
+            self._status.set(t("msg.applied", n=len(result.applied)))
         return result
 
     def restore_all(self):
         try:
             result = self.controller.restore_all()
         except PermissionError as exc:
-            self._error(f"权限不足：{exc}\n请点击「以管理员身份重启」后重试。")
+            self._error(t("err.permission", err=exc))
             return None
         self.reload()
-        self._status.set(f"已恢复 {len(result.applied)} 项改动")
+        self._status.set(t("msg.restored", n=len(result.applied)))
         return result
 
     def elevate(self) -> None:
         if relaunch_as_admin():
             self.root.destroy()
         else:
-            self._error("未能提权。可能被 UAC 拒绝，或当前已是管理员。")
+            self._error(t("err.elevate"))
 
     def _run_disable(self) -> None:
         self._apply_with_preview(self.preview_disable(self.selected_items()))
@@ -354,7 +399,7 @@ class App:
 
     def _apply_with_preview(self, plan) -> None:
         if not plan.changes and not plan.skipped:
-            self._info("没有需要变更的项。")
+            self._info(t("msg.nothing_to_change"))
             return
         if not self.confirm_preview(plan):
             return
@@ -362,7 +407,7 @@ class App:
 
     def _run_restore(self) -> None:
         if not messagebox.askyesno(
-            "确认恢复", "将按改动日志把所有被本工具修改的菜单项还原，是否继续？"
+            t("dialog.restore.title"), t("dialog.restore.message")
         ):
             return
         self.restore_all()
@@ -370,16 +415,18 @@ class App:
     def _run_alias(self) -> None:
         groups = self.selected_groups()
         if len(groups) != 1:
-            self._info("请先选中一行「功能」再设置别名。")
+            self._info(t("msg.select_group_for_alias"))
             return
         group = groups[0]
         initial = "" if group.needs_alias else group.label
         label = simpledialog.askstring(
-            "设置别名",
-            f"给这个右键功能起一个你能认出的名字，之后即可按它搜索、归并与一键开关。\n\n"
-            f"当前名称：{group.raw_name}\n"
-            f"涉及 {group.total} 条、{len(group.locations)} 处位置\n\n"
-            "留空并确定可清除别名。",
+            t("dialog.alias.title"),
+            t(
+                "dialog.alias.prompt",
+                name=group.raw_name,
+                total=group.total,
+                locations=len(group.locations),
+            ),
             initialvalue=initial,
             parent=self.root,
         )
@@ -392,13 +439,13 @@ class App:
 
     def confirm_preview(self, plan) -> bool:
         dialog = tk.Toplevel(self.root)
-        dialog.title("变更预览")
+        dialog.title(t("dialog.preview.title"))
         dialog.transient(self.root)
         dialog.geometry("760x460")
         dialog.columnconfigure(0, weight=1)
         dialog.rowconfigure(1, weight=1)
 
-        ttk.Label(dialog, text="应用前请确认以下注册表改动：", padding=(12, 10, 12, 4)).grid(
+        ttk.Label(dialog, text=t("dialog.preview.heading"), padding=(12, 10, 12, 4)).grid(
             row=0, column=0, sticky="w"
         )
         text = tk.Text(dialog, wrap="word", font=("Consolas", 9))
@@ -414,8 +461,8 @@ class App:
 
         buttons = ttk.Frame(dialog, padding=(12, 8))
         buttons.grid(row=2, column=0, sticky="e")
-        ttk.Button(buttons, text="取消", command=dialog.destroy).pack(side="right")
-        ttk.Button(buttons, text="确认应用", command=accept).pack(side="right", padx=6)
+        ttk.Button(buttons, text=t("dialog.preview.cancel"), command=dialog.destroy).pack(side="right")
+        ttk.Button(buttons, text=t("dialog.preview.confirm"), command=accept).pack(side="right", padx=6)
 
         dialog.grab_set()
         self.root.wait_window(dialog)
@@ -438,54 +485,62 @@ class App:
             self._show_item_details(items[0])
 
     def _show_item_details(self, item: ContextMenuItem) -> None:
+        scope = t("scope.user.short") if item.scope is Scope.USER else t("scope.machine.short")
         lines = [
-            f"名称：{item.display_name}",
-            f"位置：{item.location}",
-            f"类型：{KIND_LABELS[item.kind]}",
-            f"范围：{'仅当前用户' if item.scope is Scope.USER else '全机器'}",
-            f"状态：{'已禁用' if item.disabled else '启用中'}",
-            f"注册表键：{item.key_path}",
+            t("detail.name", v=item.display_name),
+            t("detail.location", v=item.location),
+            t("detail.kind", v=kind_label(item.kind)),
+            t("detail.scope", v=scope),
+            t("detail.state", v=state_label("disabled") if item.disabled else state_label("enabled")),
+            t("detail.key_path", v=item.key_path),
         ]
         if item.command:
-            lines.append(f"命令：{item.command}")
+            lines.append(t("detail.command", v=item.command))
         if item.clsid:
-            lines.append(f"CLSID：{item.clsid}")
+            lines.append(t("detail.clsid", v=item.clsid))
         if item.dll_path:
-            lines.append(f"DLL：{item.dll_path}")
+            lines.append(t("detail.dll", v=item.dll_path))
         if item.extended:
-            lines.append("仅在按住 Shift 右键时显示")
-        self._show_text("菜单项详情", "\n".join(lines))
+            lines.append(t("detail.extended_only"))
+        self._show_text(t("dialog.item_detail.title"), "\n".join(lines))
 
     def _show_group_details(self, group: MenuGroup) -> None:
-        scopes = "、".join("仅当前用户" if s is Scope.USER else "全机器" for s in group.scopes)
-        kinds = "、".join(KIND_LABELS[k] for k in group.kinds)
+        separator = t("list.separator")
+        scopes = separator.join(
+            t("scope.user.short") if s is Scope.USER else t("scope.machine.short") for s in group.scopes
+        )
+        kinds = separator.join(kind_label(k) for k in group.kinds)
         lines = [
-            f"功能名称：{group.label}",
-            f"注册表名称：{group.raw_name}",
-            f"状态：{STATE_LABELS[group.state]}",
-            f"涉及条目：{group.total} 条",
-            f"涉及位置：{'、'.join(group.locations)}",
-            f"类型：{kinds}",
-            f"范围：{scopes}",
+            t("gdetail.name", v=group.label),
+            t("gdetail.raw_name", v=group.raw_name),
+            t("gdetail.state", v=state_label(group.state)),
+            t("gdetail.items", n=group.total),
+            t("gdetail.locations", v=separator.join(group.locations)),
+            t("gdetail.kinds", v=kinds),
+            t("gdetail.scopes", v=scopes),
         ]
         if group.dll_paths:
-            lines.append("DLL：")
+            lines.append(t("gdetail.dll_header"))
             lines.extend(f"  {path}" for path in group.dll_paths)
         if group.commands:
-            lines.append("命令：")
+            lines.append(t("gdetail.command_header"))
             lines.extend(f"  {command}" for command in group.commands)
         lines.append("")
-        lines.append(f"要关闭「{group.label}」，本工具将处理以下 {group.total} 项：")
+        lines.append(t("gdetail.will_handle", name=group.label, n=group.total))
         for item in group.items:
-            lines.append(f"  · [{item.location}] {KIND_LABELS[item.kind]}  {item.key_name}")
+            lines.append(
+                t(
+                    "gdetail.item_line",
+                    location=item.location,
+                    kind=kind_label(item.kind),
+                    key_name=item.key_name,
+                )
+            )
             lines.append(f"      {item.key_path}")
         if group.needs_alias:
             lines.append("")
-            lines.append(
-                "提示：该名称取自注册表键名，可能与实际右键菜单文字不同（部分功能的文字由 DLL 运行时生成）。"
-                "可点击「设置别名…」起一个能认出的名字。"
-            )
-        self._show_text("功能详情", "\n".join(lines))
+            lines.append(t("gdetail.needs_alias_hint"))
+        self._show_text(t("dialog.group_detail.title"), "\n".join(lines))
 
     def _show_text(self, title: str, content: str) -> None:
         dialog = tk.Toplevel(self.root)
@@ -508,15 +563,15 @@ class App:
         text.configure(yscrollcommand=scroll.set)
         scroll.grid(row=0, column=1, sticky="ns")
 
-        ttk.Button(dialog, text="关闭", command=dialog.destroy).grid(row=1, column=0, pady=(0, 10))
+        ttk.Button(dialog, text=t("dialog.close"), command=dialog.destroy).grid(row=1, column=0, pady=(0, 10))
         dialog.grab_set()
         self.root.wait_window(dialog)
 
-    def _info(self, message: str, title: str = "提示") -> None:
-        messagebox.showinfo(title, message, parent=self.root)
+    def _info(self, message: str, title: str | None = None) -> None:
+        messagebox.showinfo(title or t("dialog.info.title"), message, parent=self.root)
 
     def _error(self, message: str) -> None:
-        messagebox.showerror("出错了", message, parent=self.root)
+        messagebox.showerror(t("dialog.error.title"), message, parent=self.root)
 
     # ---- 生命周期 ----
 

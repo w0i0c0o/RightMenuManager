@@ -8,6 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 
+from rightmenu.i18n import t
 from rightmenu.model import LEGACY_DISABLE_VALUE, ContextMenuItem, Kind, Scope
 from rightmenu.registry import REG_SZ, RegistryBackend
 from rightmenu.scanner import blocked_key_path
@@ -71,7 +72,7 @@ def plan(items: list[ContextMenuItem], target_disabled: bool) -> PlanResult:
 def _changes_for(item: ContextMenuItem, disable: bool) -> list[Change]:
     if item.kind is Kind.SHELLEX:
         if not item.clsid:
-            raise UnsupportedItem("无法解析 CLSID，不能用屏蔽清单安全地处理该项")
+            raise UnsupportedItem(t("action.unsupported_clsid"))
         blocked_path = blocked_key_path(item.scope)
         if disable:
             return [
@@ -83,7 +84,7 @@ def _changes_for(item: ContextMenuItem, disable: bool) -> list[Change]:
                     REG_SZ,
                     item.id,
                     item.scope,
-                    f"屏蔽「{item.display_name}」",
+                    t("action.block", name=item.display_name),
                 )
             ]
         return [
@@ -95,7 +96,7 @@ def _changes_for(item: ContextMenuItem, disable: bool) -> list[Change]:
                 None,
                 item.id,
                 item.scope,
-                f"解除屏蔽「{item.display_name}」",
+                t("action.unblock", name=item.display_name),
             )
         ]
 
@@ -109,7 +110,7 @@ def _changes_for(item: ContextMenuItem, disable: bool) -> list[Change]:
                 REG_SZ,
                 item.id,
                 item.scope,
-                f"禁用「{item.display_name}」",
+                t("action.disable", name=item.display_name),
             )
         ]
     return [
@@ -121,7 +122,7 @@ def _changes_for(item: ContextMenuItem, disable: bool) -> list[Change]:
             None,
             item.id,
             item.scope,
-            f"恢复「{item.display_name}」",
+            t("action.enable", name=item.display_name),
         )
     ]
 

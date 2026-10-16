@@ -8,6 +8,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from rightmenu import i18n
 from rightmenu.fake_registry import FakeRegistry
 from rightmenu.journal import Journal
 from rightmenu.model import Scope
@@ -21,6 +22,12 @@ except ImportError:  # 默认解释器可能不带 tkinter；本模块整体跳�
     App = None
 
 TKINTER_MISSING = tk is None
+
+
+def setUpModule() -> None:
+    # 状态栏文案是展示文案，断言依赖中文；固定语言以免受系统/其他用例影响。
+    i18n.configure(language="zh_CN")
+
 
 CLASSES = r"HKCU\Software\Classes"
 HKLM_CLASSES = r"HKLM\SOFTWARE\Classes"
@@ -237,6 +244,52 @@ class TestAppHideSystem(AppSmokeCase):
         app.reload()
         self.root.update()
         self.assertEqual(len(app.tree.get_children()), 2)
+
+
+class TestAppLanguageSwitch(AppSmokeCase):
+    def setUp(self):
+        super().setUp()
+        # 注入临时 settings，避免切换语言时写进真实的 %APPDATA%。
+        self._settings = Path(self._tmp.name) / "settings.json"
+        i18n.configure(language="zh_CN", settings_path=self._settings)
+        self.addCleanup(i18n.configure, language="zh_CN")
+
+    def test_switching_language_relabels_and_keeps_state(self):
+        app = self.app()
+        self.assertEqual(app._btn_disable.cget("text"), i18n.CATALOG["btn.disable"]["zh_CN"])
+
+        app._query.set("DemoApp")
+        self.root.update()
+        self.assertEqual(len(app.tree.get_children()), 1)
+
+        app._lang_label.set(i18n.language_label("en"))
+        app._on_language_change()
+        self.root.update()
+
+        self.assertEqual(i18n.get_language(), "en")
+        self.assertEqual(app._btn_disable.cget("text"), i18n.CATALOG["btn.disable"]["en"])
+        self.assertEqual(app._query.get(), "DemoApp")
+        self.assertEqual(len(app.tree.get_children()), 1)
+
+    def test_query_trace_is_not_duplicated_by_rebuild(self):
+        app = self.app()
+        app._lang_label.set(i18n.language_label("en"))
+        app._on_language_change()
+        app._lang_label.set(i18n.language_label("zh_CN"))
+        app._on_language_change()
+        self.root.update()
+        # 每次写 query 只应触发一次 reload；回调累积会让这个计数线性增长。
+        calls = []
+        original = app.reload
+
+        def counting_reload():
+            calls.append(1)
+            original()
+
+        app.reload = counting_reload
+        app._query.set("DemoApp")
+        self.root.update()
+        self.assertEqual(len(calls), 1)
 
 
 if __name__ == "__main__":

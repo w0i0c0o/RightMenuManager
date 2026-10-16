@@ -1,13 +1,17 @@
 """扫描位置表。
 
-纯数据：描述「去哪里找右键菜单项」。``subpath`` 与 ``location`` 中的 ``{child}``
+描述「去哪里找右键菜单项」。``subpath`` 与 ``location`` 中的 ``{child}``
 占位符在扫描时由枚举出的子键名替换。
+
+位置名是**展示文案**，经 :func:`rightmenu.i18n.t` 取词，因此用 ``scan_targets()``
+函数在调用时生成 —— 切换语言后重扫即可刷新。
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
+from rightmenu.i18n import t
 from rightmenu.model import Kind
 
 
@@ -20,41 +24,61 @@ class ScanTarget:
     child_prefix: str = ""
 
 
-SCAN_TARGETS: tuple[ScanTarget, ...] = (
-    ScanTarget(Kind.STATIC, "所有文件", r"*\shell"),
-    ScanTarget(Kind.SHELLEX, "所有文件", r"*\shellex\ContextMenuHandlers"),
-    ScanTarget(Kind.STATIC, "所有文件系统对象", r"AllFilesystemObjects\shell"),
-    ScanTarget(Kind.SHELLEX, "所有文件系统对象", r"AllFilesystemObjects\shellex\ContextMenuHandlers"),
-    ScanTarget(Kind.STATIC, "目录", r"Directory\shell"),
-    ScanTarget(Kind.SHELLEX, "目录", r"Directory\shellex\ContextMenuHandlers"),
-    ScanTarget(Kind.STATIC, "目录背景", r"Directory\Background\shell"),
-    ScanTarget(Kind.SHELLEX, "目录背景", r"Directory\Background\shellex\ContextMenuHandlers"),
-    ScanTarget(Kind.STATIC, "文件夹", r"Folder\shell"),
-    ScanTarget(Kind.SHELLEX, "文件夹", r"Folder\shellex\ContextMenuHandlers"),
-    ScanTarget(Kind.STATIC, "驱动器", r"Drive\shell"),
-    ScanTarget(Kind.SHELLEX, "驱动器", r"Drive\shellex\ContextMenuHandlers"),
-    ScanTarget(Kind.STATIC, "库文件夹", r"LibraryFolder\shell"),
-    ScanTarget(Kind.SHELLEX, "库文件夹", r"LibraryFolder\shellex\ContextMenuHandlers"),
-    ScanTarget(Kind.STATIC, "桌面背景", r"DesktopBackground\shell"),
-    ScanTarget(Kind.SHELLEX, "桌面背景", r"DesktopBackground\shellex\ContextMenuHandlers"),
-    ScanTarget(
-        Kind.STATIC,
-        "{child} 文件",
-        r"SystemFileAssociations\{child}\shell",
-        enumerate_parent=r"SystemFileAssociations",
-    ),
-    ScanTarget(
-        Kind.SHELLEX,
-        "{child} 文件",
-        r"SystemFileAssociations\{child}\shellex\ContextMenuHandlers",
-        enumerate_parent=r"SystemFileAssociations",
-    ),
-    ScanTarget(Kind.STATIC, "扩展名 {child}", r"{child}\shell", enumerate_parent="", child_prefix="."),
-    ScanTarget(
-        Kind.SHELLEX,
-        "扩展名 {child}",
-        r"{child}\shellex\ContextMenuHandlers",
-        enumerate_parent="",
-        child_prefix=".",
-    ),
-)
+def scan_targets() -> tuple[ScanTarget, ...]:
+    """按当前语言生成扫描位置表。"""
+    return (
+        ScanTarget(Kind.STATIC, t("loc.all_files"), r"*\shell"),
+        ScanTarget(Kind.SHELLEX, t("loc.all_files"), r"*\shellex\ContextMenuHandlers"),
+        ScanTarget(Kind.STATIC, t("loc.all_filesystem_objects"), r"AllFilesystemObjects\shell"),
+        ScanTarget(
+            Kind.SHELLEX,
+            t("loc.all_filesystem_objects"),
+            r"AllFilesystemObjects\shellex\ContextMenuHandlers",
+        ),
+        ScanTarget(Kind.STATIC, t("loc.directory"), r"Directory\shell"),
+        ScanTarget(Kind.SHELLEX, t("loc.directory"), r"Directory\shellex\ContextMenuHandlers"),
+        ScanTarget(Kind.STATIC, t("loc.directory_background"), r"Directory\Background\shell"),
+        ScanTarget(
+            Kind.SHELLEX,
+            t("loc.directory_background"),
+            r"Directory\Background\shellex\ContextMenuHandlers",
+        ),
+        ScanTarget(Kind.STATIC, t("loc.folder"), r"Folder\shell"),
+        ScanTarget(Kind.SHELLEX, t("loc.folder"), r"Folder\shellex\ContextMenuHandlers"),
+        ScanTarget(Kind.STATIC, t("loc.drive"), r"Drive\shell"),
+        ScanTarget(Kind.SHELLEX, t("loc.drive"), r"Drive\shellex\ContextMenuHandlers"),
+        ScanTarget(Kind.STATIC, t("loc.library_folder"), r"LibraryFolder\shell"),
+        ScanTarget(Kind.SHELLEX, t("loc.library_folder"), r"LibraryFolder\shellex\ContextMenuHandlers"),
+        ScanTarget(Kind.STATIC, t("loc.desktop_background"), r"DesktopBackground\shell"),
+        ScanTarget(
+            Kind.SHELLEX,
+            t("loc.desktop_background"),
+            r"DesktopBackground\shellex\ContextMenuHandlers",
+        ),
+        ScanTarget(
+            Kind.STATIC,
+            t("loc.file_type", child="{child}"),
+            r"SystemFileAssociations\{child}\shell",
+            enumerate_parent=r"SystemFileAssociations",
+        ),
+        ScanTarget(
+            Kind.SHELLEX,
+            t("loc.file_type", child="{child}"),
+            r"SystemFileAssociations\{child}\shellex\ContextMenuHandlers",
+            enumerate_parent=r"SystemFileAssociations",
+        ),
+        ScanTarget(
+            Kind.STATIC,
+            t("loc.extension", child="{child}"),
+            r"{child}\shell",
+            enumerate_parent="",
+            child_prefix=".",
+        ),
+        ScanTarget(
+            Kind.SHELLEX,
+            t("loc.extension", child="{child}"),
+            r"{child}\shellex\ContextMenuHandlers",
+            enumerate_parent="",
+            child_prefix=".",
+        ),
+    )
