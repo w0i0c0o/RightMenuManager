@@ -1,5 +1,5 @@
 # Assemble a portable copy of the runtime files, ready to move to another Windows machine.
-# Runtime set = run.cmd + run.ps1 + README.md / README.zh_CN.md
+# Runtime set = run.cmd + run.ps1 + LICENSE + README.md / README.zh_CN.md
 #               + rightmenu\ (source only; no __pycache__, no tests) + lang\*.json.
 #
 # Usage:
@@ -16,7 +16,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 
-$runtimeFiles = @('run.cmd', 'run.ps1', 'README.md', 'README.zh_CN.md')
+$runtimeFiles = @('run.cmd', 'run.ps1', 'LICENSE', 'README.md', 'README.zh_CN.md')
 $runtimeDirs = @('rightmenu')
 # External language packs: lang\<code>.json. Optional at runtime (built-in CATALOG is the
 # fallback), but shipping them keeps a fresh machine's dropdown populated.

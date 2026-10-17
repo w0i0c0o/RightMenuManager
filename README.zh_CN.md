@@ -141,11 +141,12 @@ powershell -ExecutionPolicy Bypass -File package_portable.ps1
 powershell -ExecutionPolicy Bypass -File package_portable.ps1 -Destination D:\RightMenuManager -Zip
 ```
 
-**需要一起移植的文件**（共 25 个，脚本会自动挑好）：
+**需要一起移植的文件**（共 26 个，脚本会自动挑好）：
 
 | 内容 | 说明 |
 |---|---|
 | `run.cmd`、`run.ps1` | 启动入口，`run.cmd` 双击即用 |
+| `LICENSE` | GPL v3 全文；以 GPL-3.0-or-later 分发时按许可证要求必须随附 |
 | `rightmenu\` 下全部 `.py` | 程序本体（`ui\` 子目录含界面） |
 | `lang\` 下全部 `.json` | 外部语言包（可选，缺了也能跑：内置目录保底）；新增语言只需往这里丢文件 |
 | `README.md`、`README.zh_CN.md` | 可选；英文与中文两份用法说明，方便目标机器上查用法 |
@@ -163,14 +164,15 @@ powershell -ExecutionPolicy Bypass -File package_portable.ps1 -Destination D:\Ri
 
 ## 许可证
 
-本项目以 **GNU General Public License v3.0（GPL-3.0）** 发布，全文见 [LICENSE](LICENSE)。
+本项目以 **GNU General Public License v3.0 或更高版本（SPDX 标识符：`GPL-3.0-or-later`）** 发布，GPL v3 全文见 [LICENSE](LICENSE)。
 
 你可以自由使用、修改、分发本软件（包括商业用途）；但若你分发修改后的版本，
-必须同样以 GPL-3.0 授权并公开完整源码（copyleft）。换言之：欢迎使用与二次开发，
+必须同样以 GPL-3.0-or-later 授权并公开完整源码（copyleft）。换言之：欢迎使用与二次开发，
 但**不能把本项目的代码闭源转卖** —— 任何收到你分发版本的人，都有权免费取得其源码。
 
 ```
 Copyright (C) 2026 w0i0c0o
+SPDX-License-Identifier: GPL-3.0-or-later
 
 This program is free software: you can redistribute it and/or modify it under the
 terms of the GNU General Public License as published by the Free Software Foundation,

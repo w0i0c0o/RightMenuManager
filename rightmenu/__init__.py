@@ -5,6 +5,9 @@
 - 静态菜单项：通过 LegacyDisable 值禁用
 
 本包不会删除任何注册表键，也不会修改其他软件自身的注册信息。
+
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (C) 2026 w0i0c0o
 """
 
-__version__ = "0.2.0"
+__version__ = "1.0.0"

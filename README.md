@@ -141,11 +141,12 @@ powershell -ExecutionPolicy Bypass -File package_portable.ps1
 powershell -ExecutionPolicy Bypass -File package_portable.ps1 -Destination D:\RightMenuManager -Zip
 ```
 
-**Files that must be ported along** (25 in total, the script picks them automatically):
+**Files that must be ported along** (26 in total, the script picks them automatically):
 
 | Content | Description |
 |---|---|
 | `run.cmd`, `run.ps1` | Launch entry points; `run.cmd` works with a double-click |
+| `LICENSE` | Full text of GPL v3; required by the GPL-3.0-or-later license when distributing |
 | All `.py` under `rightmenu\` | The program itself (the `ui\` subdirectory contains the interface) |
 | All `.json` under `lang\` | External language packs (optional; it still runs without them thanks to the built-in fallback directory); adding a language just means dropping a file here |
 | `README.md`, `README.zh_CN.md` | Optional; the English and Chinese usage docs, convenient for looking up usage on the target machine |
@@ -163,14 +164,15 @@ Target machine requirements: Windows 10/11 + Python 3.13+ with tkinter; just dou
 
 ## License
 
-This project is released under the **GNU General Public License v3.0 (GPL-3.0)**; the full text is in [LICENSE](LICENSE).
+This project is released under the **GNU General Public License v3.0 or any later version (SPDX identifier: `GPL-3.0-or-later`)**; the full text of GPL v3 is in [LICENSE](LICENSE).
 
 You are free to use, modify, and distribute this software (including for commercial purposes); however, if you distribute a modified version,
-you must likewise license it under GPL-3.0 and publish the complete source code (copyleft). In other words: use and secondary development are welcome,
+you must likewise license it under GPL-3.0-or-later and publish the complete source code (copyleft). In other words: use and secondary development are welcome,
 but you **cannot close-source and resell this project's code** — anyone who receives your distributed version has the right to obtain its source code for free.
 
 ```
 Copyright (C) 2026 w0i0c0o
+SPDX-License-Identifier: GPL-3.0-or-later
 
 This program is free software: you can redistribute it and/or modify it under the
 terms of the GNU General Public License as published by the Free Software Foundation,

@@ -4,6 +4,15 @@
 
 This file records all notable changes. Format based on Keep a Changelog.
 
+## [1.0.0] - 2026-10-17
+
+First stable release. The feature set of 0.2.0 is promoted to 1.0.0 without behavior changes.
+
+### Changed
+- Version set to **1.0.0**: the program is considered stable — non-destructive registry operations, full coverage of user/machine scopes, functional grouping, aliases, system-item filtering, change journal and one-click restore, and bilingual UI (Simplified Chinese / English)
+- License explicitly clarified as **GPL-3.0-or-later** (SPDX identifier): previously documented as "GPL-3.0" even though the copyright notice already granted "version 3 of the License, or (at your option) any later version". The identifier is now stated consistently at the top of `LICENSE`, in both READMEs, and in the `rightmenu/__init__.py` header
+- Portable bundle now ships `LICENSE` too (the GPL requires providing the license text when distributing); the ported-file count in both READMEs is updated to 26
+
 ## [0.2.0] - 2026-10-17
 
 ### Added

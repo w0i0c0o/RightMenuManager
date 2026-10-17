@@ -343,7 +343,7 @@ docs/
 run.cmd            # 双击启动：转发到 run.ps1
 run.ps1            # 定位带 tkinter 的解释器并启动
 Makefile           # test / run / scan / scan-machine 任务
-README.md  README.zh_CN.md  CHANGELOG.md  CHANGELOG.zh_CN.md  .gitignore
+LICENSE  README.md  README.zh_CN.md  CHANGELOG.md  CHANGELOG.zh_CN.md  .gitignore
 ```
 
 ## 测试（如何证明）

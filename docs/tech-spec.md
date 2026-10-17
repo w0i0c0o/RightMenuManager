@@ -343,7 +343,7 @@ docs/
 run.cmd            # double-click launcher: forwards to run.ps1
 run.ps1            # locates an interpreter with tkinter and launches it
 Makefile           # test / run / scan / scan-machine tasks
-README.md  README.zh_CN.md  CHANGELOG.md  CHANGELOG.zh_CN.md  .gitignore
+LICENSE  README.md  README.zh_CN.md  CHANGELOG.md  CHANGELOG.zh_CN.md  .gitignore
 ```
 
 ## Tests (how to prove it)
